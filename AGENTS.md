@@ -49,6 +49,9 @@ The dev machine is a laptop: **2 cores / 4 threads (i7-7500U), 15 GB RAM (about 
 
 ## 5. Working agreement
 
+0. **Start of session:** read `PROGRESS.md` (latest handoff), then `git log --oneline -10`.
+   **End of session:** add a new entry at the top of `PROGRESS.md` (what was done, current state, next step,
+   gotchas) and commit it.
 1. Read `PLAN.md` and find the current phase before starting work. Don't skip ahead.
 2. Before writing code, state the acceptance criteria you're targeting (they're in PLAN.md).
 3. Make the smallest change that meets them. Don't add speculative abstractions or features not in PLAN.md.
