@@ -6,6 +6,28 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-14: Rough case study in README + Excalidraw diagrams
+
+**Done**
+- README.md rewritten as a rough case study (problem, architecture, job flow, fault tolerance, tenancy,
+  serving, observability, decisions, running, testing, results placeholders). Not-yet-built parts are marked 🚧,
+  and §12 Results says TBD on purpose. **Don't invent numbers.**
+- 4 diagrams in `docs/diagrams/`: architecture, job-lifecycle, fault-tolerance, multi-tenancy.
+  Source of truth is `docs/diagrams/src/*.json` (Excalidraw element skeletons). `make diagrams` regenerates
+  the `.excalidraw` (editable) and `.svg` (README) files with `scripts/render_diagrams.py` (pure Python, with the Virgil font
+  inlined, cached in git-ignored `.cache/`).
+- Resume bullet drafts moved from the README to PLAN.md Phase 9.
+
+**Next:** still Phase 1 (see the entry below). When a phase ships, update its README section: drop 🚧 and add real results.
+
+**Gotchas**
+- Rendering via headless Chrome + the Excalidraw JS library was blocked by the sandbox, so the renderer is a
+  hand-rolled Python SVG writer. If you edit a diagram in excalidraw.com, copy the changes back into `src/*.json`,
+  or `make diagrams` will overwrite them.
+- To preview an SVG locally: `google-chrome --headless=new --screenshot=out.png --window-size=W,H file://.../x.svg`.
+
+---
+
 ## 2026-11-14: Phase 0 complete
 
 **Done**

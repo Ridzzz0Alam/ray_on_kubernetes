@@ -19,6 +19,8 @@ models/
 ray_results/
 .shared/
 
+.cache/
+
 # Platform state
 *.db
 *.sqlite

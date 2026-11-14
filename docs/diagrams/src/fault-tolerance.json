@@ -1,0 +1,24 @@
+[
+  {"type":"text","x":20,"y":0,"text":"Fault tolerance: kill a worker mid-training","fontSize":28},
+
+  {"type":"rectangle","x":20,"y":80,"width":200,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"Epoch 1","fontSize":20}},
+  {"type":"arrow","x":220,"y":115,"width":40,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":260,"y":80,"width":220,"height":70,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"checkpoint_1 saved\nto /shared","fontSize":18}},
+  {"type":"arrow","x":480,"y":115,"width":40,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":520,"y":80,"width":200,"height":70,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"Epoch 2 (partial)","fontSize":18}},
+  {"type":"arrow","x":720,"y":115,"width":40,"height":0,"strokeColor":"#ef4444"},
+  {"type":"rectangle","x":760,"y":80,"width":240,"height":70,"backgroundColor":"#ffc9c9","strokeColor":"#ef4444","roundness":{"type":3},"label":{"text":"worker pod killed\nchaos_kill_worker.sh","fontSize":18}},
+
+  {"type":"arrow","x":880,"y":150,"width":0,"height":90,"strokeColor":"#ef4444"},
+  {"type":"rectangle","x":760,"y":240,"width":240,"height":80,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"Ray Train restarts\nworker group\n(max_failures=3)","fontSize":18}},
+  {"type":"arrow","x":760,"y":280,"width":-60,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":440,"y":240,"width":260,"height":80,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"get_checkpoint()\nrestore model, optimizer,\nepoch = 1","fontSize":18}},
+  {"type":"arrow","x":370,"y":150,"width":120,"height":90,"strokeColor":"#06b6d4","strokeStyle":"dashed","label":{"text":"read","fontSize":16}},
+
+  {"type":"arrow","x":570,"y":320,"width":0,"height":60,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":440,"y":380,"width":260,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"Epoch 2 (re-run)","fontSize":20}},
+  {"type":"arrow","x":700,"y":415,"width":60,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":760,"y":380,"width":240,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"SUCCEEDED","fontSize":20}},
+
+  {"type":"rectangle","x":20,"y":240,"width":380,"height":210,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","strokeWidth":1,"roundness":{"type":3},"label":{"text":"What the test asserts\n\n- job ends SUCCEEDED\n- logs: resumed from epoch 1\n- work lost <= 1 epoch\n- no orphan Ray pods","fontSize":18}}
+]

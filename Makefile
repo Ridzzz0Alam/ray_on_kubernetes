@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help tools sync lint fmt test check
+.PHONY: help tools sync lint fmt test check diagrams
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -24,3 +24,6 @@ test: ## Unit tests (no cluster needed)
 	uv run pytest -m "not k8s"
 
 check: lint test ## What CI runs
+
+diagrams: ## Render docs/diagrams/src/*.json → .excalidraw + .svg
+	uv run python scripts/render_diagrams.py

@@ -1,0 +1,25 @@
+[
+  {"type":"text","x":20,"y":0,"text":"Job lifecycle (as tracked in the registry)","fontSize":28},
+
+  {"type":"rectangle","x":20,"y":80,"width":220,"height":80,"backgroundColor":"#a5d8ff","strokeColor":"#4a9eed","roundness":{"type":3},"label":{"text":"SUBMITTED\nregistry row created","fontSize":18}},
+  {"type":"arrow","x":240,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":290,"y":80,"width":220,"height":80,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"PENDING\nwaiting on quota","fontSize":18}},
+  {"type":"arrow","x":510,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":560,"y":80,"width":220,"height":80,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"RUNNING\ncheckpoint each epoch","fontSize":18}},
+  {"type":"arrow","x":780,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":830,"y":80,"width":220,"height":80,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"SUCCEEDED\ncluster torn down","fontSize":18}},
+
+  {"type":"text","x":290,"y":172,"text":"queue time = start - submit","fontSize":16,"strokeColor":"#b45309"},
+
+  {"type":"arrow","x":400,"y":200,"width":0,"height":100,"strokeColor":"#ef4444","label":{"text":"cancel","fontSize":16}},
+  {"type":"arrow","x":590,"y":160,"width":-110,"height":140,"strokeColor":"#ef4444","label":{"text":"cancel","fontSize":16}},
+  {"type":"rectangle","x":290,"y":300,"width":220,"height":80,"backgroundColor":"#e9ecef","strokeColor":"#757575","roundness":{"type":3},"label":{"text":"CANCELLED\nRayJob CR deleted","fontSize":18}},
+
+  {"type":"arrow","x":760,"y":160,"width":0,"height":140,"strokeColor":"#ef4444","label":{"text":"crash","fontSize":16}},
+  {"type":"arrow","x":650,"y":300,"width":0,"height":-140,"strokeColor":"#22c55e","label":{"text":"retry","fontSize":16}},
+  {"type":"rectangle","x":560,"y":300,"width":220,"height":80,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"RETRYING\nnew cluster,\nsame checkpoint dir","fontSize":18}},
+  {"type":"arrow","x":780,"y":340,"width":50,"height":0,"strokeColor":"#ef4444"},
+  {"type":"rectangle","x":830,"y":300,"width":220,"height":80,"backgroundColor":"#ffc9c9","strokeColor":"#ef4444","roundness":{"type":3},"label":{"text":"FAILED\nbackoffLimit reached","fontSize":18}},
+
+  {"type":"rectangle","x":20,"y":420,"width":1030,"height":70,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","strokeWidth":1,"roundness":{"type":3},"label":{"text":"Worker loss inside a run is absorbed by Ray Train (FailureConfig) without leaving RUNNING.\nWhole-job crashes go through RETRYING (RayJob backoffLimit) and resume from the last checkpoint.","fontSize":16}}
+]

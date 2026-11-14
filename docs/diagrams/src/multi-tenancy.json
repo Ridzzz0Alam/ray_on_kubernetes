@@ -1,0 +1,19 @@
+[
+  {"type":"text","x":20,"y":0,"text":"Multi-tenancy: a noisy team cannot starve another","fontSize":28},
+
+  {"type":"rectangle","x":20,"y":70,"width":490,"height":340,"backgroundColor":"#fff5f5","strokeColor":"#ef4444","strokeStyle":"dashed","roundness":{"type":3}},
+  {"type":"text","x":38,"y":80,"text":"ns team-a   quota: 2 CPU / 3Gi","fontSize":20,"strokeColor":"#b91c1c"},
+  {"type":"rectangle","x":40,"y":125,"width":450,"height":45,"backgroundColor":"#ffc9c9","strokeColor":"#ef4444","roundness":{"type":3},"label":{"text":"quota used: 2 / 2 CPU  (full)","fontSize":18}},
+  {"type":"rectangle","x":40,"y":195,"width":450,"height":60,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"job a-1: RUNNING","fontSize":18}},
+  {"type":"rectangle","x":40,"y":280,"width":215,"height":60,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"job a-2: PENDING","fontSize":18}},
+  {"type":"rectangle","x":275,"y":280,"width":215,"height":60,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"job a-3: PENDING","fontSize":18}},
+  {"type":"text","x":40,"y":360,"text":"extra jobs queue, they never borrow from team-b","fontSize":16,"strokeColor":"#b45309"},
+
+  {"type":"rectangle","x":550,"y":70,"width":490,"height":340,"backgroundColor":"#f4fcf5","strokeColor":"#22c55e","strokeStyle":"dashed","roundness":{"type":3}},
+  {"type":"text","x":568,"y":80,"text":"ns team-b   quota: 2 CPU / 3Gi","fontSize":20,"strokeColor":"#15803d"},
+  {"type":"rectangle","x":570,"y":125,"width":450,"height":45,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"quota used: 1.5 / 2 CPU","fontSize":18}},
+  {"type":"rectangle","x":570,"y":195,"width":450,"height":60,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"job b-1: RUNNING (scheduled immediately)","fontSize":18}},
+  {"type":"text","x":570,"y":360,"text":"queue time stays flat while team-a is saturated","fontSize":16,"strokeColor":"#15803d"},
+
+  {"type":"rectangle","x":20,"y":440,"width":1020,"height":70,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"kind node allocatable  >=  sum of team quotas\nso one team hitting its ceiling never eats into another team's share","fontSize":18}}
+]
