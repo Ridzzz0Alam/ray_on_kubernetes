@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Local data / artifacts (never commit)
+data/
+checkpoints/
+artifacts/
+models/
+*.pt
+*.safetensors
+ray_results/
+.shared/
+
+# Platform state
+*.db
+*.sqlite
+
+# Secrets / cluster access
+.env
+.env.*
+kubeconfig*
+*.pem
+*.key
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code local-only settings
+.claude/settings.local.json
