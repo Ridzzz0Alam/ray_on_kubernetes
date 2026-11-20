@@ -6,6 +6,33 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-20: Phase 1 complete (cluster + hello RayJob)
+
+**Done**
+- `docker/Dockerfile` + `docker/requirements.txt`: `RAY_IMAGE` + torch 2.15.0 (CPU index), transformers 5.22.2,
+  datasets 5.1.0 → `RKP_IMAGE=rkp-ray:2.59.0-1` (new key in `infra/versions.env`). About 3 min to build, 5 GB on disk.
+- `infra/kind/cluster.yaml` (single node `rkp`, `./.shared → /shared`), `infra/helm/kuberay-operator-values.yaml`.
+- `infra/k8s/examples/hello-rayjob.yaml`: head (`num-cpus: 0`) + 2 workers, script in a ConfigMap,
+  `shutdownAfterJobFinishes: true`, `ttlSecondsAfterFinished: 30`, `imagePullPolicy: Never`.
+- Makefile: `up` (idempotent, kind-loads the image if built), `down`, `image`, `load`, `hello`.
+- Tests: 7 pass. The new ones check that the manifest, Dockerfile and versions.env agree, and that image deps are pinned.
+
+**Measured**
+- `make hello`: SUCCEEDED in 43s, with tasks spread over both workers. The RayCluster and its pods were gone 30s after it finished.
+- Node RAM: 1.0 GiB idle (kind + operator), **3.9 GiB peak** during the job, under the 5 GB target.
+
+**State:** the cluster has been deleted (`make down`). The `rkp-ray:2.59.0-1` image stays in local Docker.
+
+**Next: Phase 2** (API + SDK, see PLAN.md). Run `make up` first, which recreates the cluster and loads the image (about 1.5 min).
+
+**Gotchas**
+- `kind load` of the 5 GB image takes about 1.5 min. Avoid rebuilding unless deps change, and bump the `-N` tag when they do.
+- kind accepts the relative `hostPath: ./.shared`, but only when you run from the repo root (the Makefile always does).
+- The RayJob CR and its completed submitter pod stay after the TTL. Only the RayCluster is deleted, so Phase 2 must delete finished CRs.
+- Don't wait on a process with `pgrep -f "<cmd>"` inside a shell whose own command line contains `<cmd>`. It matches itself and never exits.
+
+---
+
 ## 2026-11-14: Rough case study in README + Excalidraw diagrams
 
 **Done**

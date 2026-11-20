@@ -163,11 +163,18 @@ make sync    # Python 3.12 env from uv.lock
 make check   # lint + unit tests
 ```
 
+Cluster + hello-world RayJob (Phase 1):
+
+```bash
+make image       # build the Ray runtime image (~3 min first time); kind-loads it if the cluster is up
+make up          # single-node kind cluster + KubeRay operator; loads the image if built
+make hello       # 2-worker RayJob → SUCCEEDED, RayCluster torn down 30s after
+make down        # delete the cluster
+```
+
 🚧 Coming in later phases:
 
 ```bash
-make up          # kind cluster + KubeRay operator
-make image       # build the Ray runtime image and load it into kind
 make teams       # namespaces + quotas for team-a / team-b
 make api         # run the platform API locally
 rkp submit ...   # see §4
@@ -203,7 +210,7 @@ These will be filled in from real runs. No numbers until they're measured.
 | Work lost when a worker is killed mid-epoch | TBD (target: ≤ 1 epoch) |
 | Team-b queue time while team-a is saturated | TBD |
 | Serve replicas under load / p50 latency | TBD |
-| Peak stack RAM | TBD (budget: 7 GB) |
+| Peak stack RAM | 3.9 GiB for the Phase 1 hello RayJob (head + 2 workers + kind + operator); training TBD (budget: 7 GB) |
 
 ## 13. What production would change
 
@@ -215,7 +222,7 @@ See [ARCHITECTURE.md §9](ARCHITECTURE.md#9-production-gaps-deliberately-not-bui
 
 ```
 platform_api/   FastAPI service            🚧    infra/versions.env  pinned versions   ✅
-sdk/            Python SDK + rkp CLI       🚧    infra/kind, k8s, helm                 🚧
+sdk/            Python SDK + rkp CLI       🚧    infra/kind, k8s, helm  cluster, operator  ✅
 workloads/      Ray Train + Ray Serve      🚧    scripts/            tools, diagrams   ✅
 docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest            ✅
 ```
@@ -225,7 +232,7 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 | Phase | | Phase | |
 |---|---|---|---|
 | 0 Bootstrap | ✅ | 5 Ray Serve | 🚧 |
-| 1 Cluster + hello RayJob | 🚧 | 6 Multi-tenancy | 🚧 |
+| 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | 🚧 |
 | 2 API + SDK | 🚧 | 7 Observability + cost | 🚧 |
 | 3 Distributed training | 🚧 | 8 GPU awareness | 🚧 |
 | 4 Lifecycle | 🚧 | 9 Polish + full case study | 🚧 |

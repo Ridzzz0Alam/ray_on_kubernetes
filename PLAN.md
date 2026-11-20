@@ -34,19 +34,19 @@ dashboard polish (keep the raw metrics and the cost report) → Serve load-test 
 - [x] `make check` passes locally (5 tests). CI runs on push
 - [x] `kind version`, `kubectl version --client` and `helm version` all work
 
-## Phase 1: Cluster + hello-world RayJob (Sat morning)
+## Phase 1: Cluster + hello-world RayJob (Sat morning) ✅
 
-- [ ] `infra/kind/cluster.yaml`: a single node using `KIND_NODE_IMAGE`, with a hostPath mount `./.shared → /shared`
-- [ ] Install the KubeRay operator with Helm (`KUBERAY_CHART_VERSION`, low resource requests)
-- [ ] `docker/Dockerfile`: `RAY_IMAGE` + CPU torch + transformers + datasets, then `kind load` it.
+- [x] `infra/kind/cluster.yaml`: a single node using `KIND_NODE_IMAGE`, with a hostPath mount `./.shared → /shared`
+- [x] Install the KubeRay operator with Helm (`KUBERAY_CHART_VERSION`, low resource requests)
+- [x] `docker/Dockerfile`: `RAY_IMAGE` + CPU torch + transformers + datasets, then `kind load` it.
       **Start this build first.** It's the longest step
-- [ ] `infra/k8s/examples/hello-rayjob.yaml`: a trivial Ray script on 2 workers
-- [ ] `make up`, `make down` and `make image`
+- [x] `infra/k8s/examples/hello-rayjob.yaml`: a trivial Ray script on 2 workers
+- [x] `make up`, `make down` and `make image`
 
 **Acceptance**
-- [ ] `make up && kubectl apply -f infra/k8s/examples/hello-rayjob.yaml` reaches `SUCCEEDED`
-- [ ] The cluster is cleaned up after the job (`shutdownAfterJobFinishes: true`)
-- [ ] Peak RAM for the whole stack stays under 5 GB (`docker stats`)
+- [x] `make up && kubectl apply -f infra/k8s/examples/hello-rayjob.yaml` reaches `SUCCEEDED`
+- [x] The cluster is cleaned up after the job (`shutdownAfterJobFinishes: true`)
+- [x] Peak RAM for the whole stack stays under 5 GB (`docker stats`): measured 3.9 GiB peak, 1.0 GiB idle
 
 ## Phase 2: Submission API + SDK (Sat afternoon)
 
@@ -161,3 +161,5 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-14 | SQLite job registry next to the RayJob CRs | Keeps history after CRs are deleted, and is needed for queue-time and cost metrics |
 | 2026-11-14 | Compressed to a one-weekend plan | The owner wants it done in about 2 days. Phase 6 moved before 5 to feed the Phase 7 dashboard |
 | 2026-11-14 | Pins: kind v0.33.0 (node v1.37.0), kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 / py3.12 | Prefer releases at least 2 weeks old. Skipped Helm 4.3.2 (1 day old) and Ray 2.60.0 (10 days old) |
+| 2026-11-20 | Image `rkp-ray:2.59.0-1`: torch 2.15.0 (CPU index), transformers 5.22.2, datasets 5.1.0 | Newest releases at least 2 weeks old. CPU wheel index avoids about 2 GB of CUDA libraries. Tag suffix `-N` is bumped when deps change |
+| 2026-11-20 | Node image pinned via `kind create --image`, not in `cluster.yaml` | Keeps `infra/versions.env` the single source of truth |
