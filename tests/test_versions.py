@@ -13,6 +13,7 @@ REQUIRED = {
     "RAY_VERSION",
     "RAY_IMAGE",
     "PYTHON_VERSION",
+    "RKP_IMAGE",
 }
 
 
@@ -53,3 +54,24 @@ def test_ray_image_matches_ray_and_python_versions() -> None:
     v = load_versions()
     py_tag = "py" + v["PYTHON_VERSION"].replace(".", "")
     assert v["RAY_IMAGE"] == f"rayproject/ray:{v['RAY_VERSION']}-{py_tag}-cpu"
+
+
+ROOT = VERSIONS_FILE.parents[1]
+
+
+def test_rkp_image_is_used_by_manifests_and_dockerfile() -> None:
+    v = load_versions()
+    assert re.fullmatch(rf"rkp-ray:{re.escape(v['RAY_VERSION'])}-\d+", v["RKP_IMAGE"])
+    dockerfile = (ROOT / "docker" / "Dockerfile").read_text()
+    assert f"ARG RAY_IMAGE={v['RAY_IMAGE']}" in dockerfile
+    manifest = (ROOT / "infra" / "k8s" / "examples" / "hello-rayjob.yaml").read_text()
+    images = set(re.findall(r"image:\s*(\S+)", manifest))
+    assert images == {v["RKP_IMAGE"]}, images
+    assert f'rayVersion: "{v["RAY_VERSION"]}"' in manifest
+
+
+def test_python_deps_in_image_are_pinned() -> None:
+    for line in (ROOT / "docker" / "requirements.txt").read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if line:
+            assert re.fullmatch(r"[A-Za-z0-9_.-]+==[\w.]+", line), line

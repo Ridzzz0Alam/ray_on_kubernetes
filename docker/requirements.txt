@@ -1,0 +1,5 @@
+# Baked into the Ray runtime image. Pin exactly; bump deliberately (PLAN.md Decision log).
+# torch comes from the CPU-only index (see Dockerfile) to avoid ~2 GB of CUDA wheels.
+torch==2.15.0
+transformers==5.22.2
+datasets==5.1.0

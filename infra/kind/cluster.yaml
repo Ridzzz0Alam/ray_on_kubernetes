@@ -1,0 +1,12 @@
+# Single-node kind cluster (laptop budget: see ARCHITECTURE.md §6). Don't add worker nodes.
+# The node image is pinned in infra/versions.env and passed with `kind create cluster --image`.
+# `make up` runs from the repo root, so ./.shared resolves to <repo>/.shared.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: rkp
+nodes:
+  - role: control-plane
+    extraMounts:
+      # Shared data/checkpoints for Ray pods (hostPath /shared inside the node).
+      - hostPath: ./.shared
+        containerPath: /shared

@@ -1,0 +1,9 @@
+# KubeRay operator values (chart version pinned as KUBERAY_CHART_VERSION in infra/versions.env).
+# Budget: 0.1 CPU / 256Mi (ARCHITECTURE.md §6). Fine for a handful of Ray pods.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

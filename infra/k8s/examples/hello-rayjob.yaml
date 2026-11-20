@@ -1,0 +1,77 @@
+# Phase 1 smoke test: a trivial Ray script on 2 workers.
+#   kubectl apply -f infra/k8s/examples/hello-rayjob.yaml
+#   kubectl get rayjob hello -w        # → jobDeploymentStatus Complete, jobStatus SUCCEEDED
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: hello
+spec:
+  entrypoint: python /home/ray/hello/hello.py
+  shutdownAfterJobFinishes: true      # tear the RayCluster down once the job ends
+  ttlSecondsAfterFinished: 30
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: rkp-ray:2.59.0-1
+          imagePullPolicy: Never
+          resources:
+            requests: {cpu: 50m, memory: 200Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+  rayClusterSpec:
+    rayVersion: "2.59.0"
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: "0"                 # no tasks on the head
+      template:
+        spec:
+          containers:
+            - name: ray-head
+              image: rkp-ray:2.59.0-1
+              imagePullPolicy: Never
+              resources:
+                requests: {cpu: 250m, memory: 1Gi}
+                limits: {cpu: "1", memory: 1536Mi}
+              volumeMounts:
+                - {name: hello, mountPath: /home/ray/hello}
+          volumes:
+            - name: hello
+              configMap: {name: hello-script}
+    workerGroupSpecs:
+      - groupName: cpu
+        replicas: 2
+        minReplicas: 2
+        maxReplicas: 2
+        rayStartParams:
+          num-cpus: "1"
+        template:
+          spec:
+            containers:
+              - name: ray-worker
+                image: rkp-ray:2.59.0-1
+                imagePullPolicy: Never
+                resources:
+                  requests: {cpu: 500m, memory: 512Mi}
+                  limits: {cpu: "1", memory: 1Gi}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-script
+data:
+  hello.py: |
+    import socket
+    import ray
+
+    ray.init()
+
+    @ray.remote(num_cpus=1)
+    def where(i: int) -> str:
+        return f"task {i} ran on {socket.gethostname()}"
+
+    for line in ray.get([where.remote(i) for i in range(4)]):
+        print(line)
+    nodes = [n for n in ray.nodes() if n["Alive"]]
+    print(f"alive nodes: {len(nodes)}, cluster CPUs: {ray.cluster_resources().get('CPU')}")
+    print("hello from rkp")
