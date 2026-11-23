@@ -45,7 +45,8 @@ class JobSpec(BaseModel):
     files: dict[str, str] = Field(default_factory=dict, description="filename -> file content")
     workers: int = Field(default=2, ge=1, le=4)
     cpu: int = Field(default=1, ge=1, le=2, description="Ray CPUs (and CPU limit) per worker")
-    memory: str = Field(default="1Gi", description="Memory limit per worker, e.g. 1Gi")
+    # 1536Mi: a Ray Train worker with torch + transformers peaked at ~1.3GB (Phase 3)
+    memory: str = Field(default="1536Mi", description="Memory limit per worker, e.g. 2Gi")
     resources: dict[str, float] = Field(
         default_factory=dict, description="Ray custom resources per worker, e.g. {'sim_gpu': 1}"
     )

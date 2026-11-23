@@ -33,7 +33,8 @@ def test_rayjob_shape() -> None:
     assert group["replicas"] == group["minReplicas"] == group["maxReplicas"] == 3
     assert group["rayStartParams"] == {"num-cpus": "2"}
     worker = group["template"]["spec"]["containers"][0]
-    assert worker["env"] == [{"name": "PYTHONPATH", "value": CODE_DIR}]
+    assert {"name": "PYTHONPATH", "value": CODE_DIR} in worker["env"]
+    assert {"name": "RKP_JOB_ID", "value": "abc12345"} in worker["env"]
     assert worker["resources"] == {
         "requests": {"cpu": "1000m", "memory": "1024Mi"},
         "limits": {"cpu": "2", "memory": "2048Mi"},
@@ -58,7 +59,24 @@ def test_no_files_means_no_code_volume() -> None:
     s = JobSpec(entrypoint="python -c 'print(1)'")
     rj = build_rayjob("abc12345", "team-a", s, image="x", ray_version="2.59.0")
     assert rj["spec"]["entrypoint"] == "python -c 'print(1)'"
-    assert rj["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["volumes"] == []
+    volumes = rj["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["volumes"]
+    assert "code" not in {v["name"] for v in volumes}
+
+
+def test_shared_data_is_read_only_and_checkpoints_are_per_team() -> None:
+    rj = build_rayjob("abc12345", "team-b", JobSpec(entrypoint="x"), image="x", ray_version="2")
+    for pod in (
+        rj["spec"]["rayClusterSpec"]["headGroupSpec"]["template"],
+        rj["spec"]["rayClusterSpec"]["workerGroupSpecs"][0]["template"],
+    ):
+        volumes = {v["name"]: v["hostPath"] for v in pod["spec"]["volumes"]}
+        assert volumes["checkpoints"] == {"path": "/shared/checkpoints/team-b", "type": "Directory"}
+        assert volumes["shared-data"]["path"] == "/shared/data"
+        mounts = {m["name"]: m for m in pod["spec"]["containers"][0]["volumeMounts"]}
+        assert mounts["shared-data"]["readOnly"] is True
+        assert mounts["checkpoints"]["mountPath"] == "/shared/checkpoints"
+    submitter = rj["spec"]["submitterPodTemplate"]["spec"]["containers"][0]
+    assert "volumeMounts" not in submitter
 
 
 def test_custom_resources_are_shell_quoted_json() -> None:
@@ -74,6 +92,7 @@ def test_custom_resources_are_shell_quoted_json() -> None:
         ({"jobDeploymentStatus": "Initializing"}, JobState.PENDING),
         ({"jobDeploymentStatus": "Running", "jobStatus": "PENDING"}, JobState.PENDING),
         ({"jobDeploymentStatus": "Running", "jobStatus": "RUNNING"}, JobState.RUNNING),
+        ({"jobDeploymentStatus": "Running", "jobStatus": "SUCCEEDED"}, JobState.RUNNING),
         ({"jobDeploymentStatus": "Retrying", "jobStatus": "FAILED"}, JobState.RETRYING),
         ({"jobDeploymentStatus": "Complete", "jobStatus": "SUCCEEDED"}, JobState.SUCCEEDED),
         ({"jobDeploymentStatus": "Complete", "jobStatus": "FAILED"}, JobState.FAILED),

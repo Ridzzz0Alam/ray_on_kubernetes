@@ -44,7 +44,7 @@ def submit(
     script: Annotated[str, typer.Option(help="Entry script when PATH is a directory")] = "main.py",
     workers: Annotated[int, typer.Option(min=1, max=4)] = 2,
     cpu: Annotated[int, typer.Option(min=1, max=2, help="CPUs per worker")] = 1,
-    memory: Annotated[str, typer.Option(help="Memory per worker")] = "1Gi",
+    memory: Annotated[str, typer.Option(help="Memory per worker")] = "1536Mi",
     retries: Annotated[int, typer.Option(min=0, max=5)] = 0,
     wait: Annotated[bool, typer.Option("--wait/--no-wait", help="Follow until it ends")] = True,
 ) -> None:

@@ -59,7 +59,9 @@ def observe(rayjob: dict[str, Any]) -> Observation:
         return Observation(state, message, started, finished or _time(status.get("endTime")))
     if deployment == "Retrying":
         return Observation(JobState.RETRYING, message)
-    if ray_status == "RUNNING":
+    # Ray reports the job done a few seconds before KubeRay marks the deployment Complete;
+    # until then it's still RUNNING (not back to PENDING).
+    if ray_status in {"RUNNING", "SUCCEEDED", "FAILED", "STOPPED"}:
         return Observation(JobState.RUNNING, None, started)
     return Observation(JobState.PENDING)
 
