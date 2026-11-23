@@ -67,23 +67,38 @@ many of the decisions (§9): a single-node cluster, one Ray cluster at a time, a
 Editable sources for all diagrams: [`docs/diagrams/*.excalidraw`](docs/diagrams/). Open them at
 [excalidraw.com](https://excalidraw.com) or in the VS Code Excalidraw extension.
 
-## 4. How a job flows 🚧
+## 4. How a job flows
 
-```bash
-rkp submit --team team-a --workers 2 --cpu 1 --memory 1.5Gi --retries 2 \
-    workloads/train/train.py -- --profile tiny --epochs 3
-# → job_id: j-7f3a  state: SUBMITTED
-rkp status j-7f3a     # PENDING → RUNNING → SUCCEEDED
-rkp logs j-7f3a       # streams the Ray driver logs
-rkp cancel j-7f3a     # deletes the RayJob, state → CANCELLED
+A real run of the Phase 2 smoke test:
+
+```console
+$ rkp submit --team team-a workloads/hello.py
+0e639b3a
+[    0s] SUBMITTED
+[    2s] PENDING
+[   42s] RUNNING
+[   62s] SUCCEEDED  (Job finished successfully.)
+$ rkp logs 0e639b3a | grep -v '^20'
+task 0 ran on rkp-0e639b3a-vqh2s-cpu-worker-z8ngf
+task 1 ran on rkp-0e639b3a-vqh2s-cpu-worker-27wsm
+...
+hello from rkp
+$ rkp cancel <id>          # deletes the RayJob, state → CANCELLED
+$ rkp status <id> -t team-b
+error: HTTP 403: job <id> belongs to another team
 ```
+
+Options: `--workers`, `--cpu`, `--memory`, `--retries`, `--no-wait`, and script arguments after `--`.
+Most of the 42s in PENDING is pod start-up for the head and workers on 2 cores.
 
 1. The CLI sends the spec to `POST /jobs` with the team's API key.
 2. The API resolves the key to a team and namespace (never taken from the request body), validates the `JobSpec` and
    writes a `SUBMITTED` row.
 3. The API creates a `RayJob` in `team-a`. KubeRay starts a RayCluster (head + workers), runs the entrypoint,
    then shuts the cluster down (`shutdownAfterJobFinishes`).
-4. The reconciler records each state change. `queue time = started_at − submitted_at`.
+4. The reconciler records each state change. `queue time = started_at − submitted_at`, using Ray's own start time.
+5. When the job ends, the reconciler copies the driver logs into SQLite and deletes the RayJob.
+   Owner references remove the cluster, the submitter and the code ConfigMap.
 
 ![Job lifecycle](docs/diagrams/job-lifecycle.svg)
 
@@ -172,12 +187,14 @@ make hello       # 2-worker RayJob → SUCCEEDED, RayCluster torn down 30s after
 make down        # delete the cluster
 ```
 
-🚧 Coming in later phases:
+API + CLI (Phase 2):
 
 ```bash
-make teams       # namespaces + quotas for team-a / team-b
-make api         # run the platform API locally
-rkp submit ...   # see §4
+make teams       # team-a / team-b namespaces (quotas come in Phase 6)
+make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
+make api         # platform API on 127.0.0.1:8000, in another terminal
+uv run rkp submit --team team-a workloads/hello.py    # see §4
+make test-k8s    # end-to-end submit / logs / cancel against kind (~2 min)
 make down        # tear everything down
 ```
 
@@ -190,8 +207,8 @@ kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).
 |---|---|---|---|
 | Static | ruff lint + format, shellcheck | `make lint`, CI | ✅ |
 | Config guard | Every version pinned, node image pinned by digest | `tests/test_versions.py` | ✅ |
-| Unit | JobSpec → RayJob manifest, auth scoping, cost maths (fake K8s client) | `make test` | 🚧 |
-| Integration | Submit / status / logs / cancel against kind | `make test-k8s` | 🚧 |
+| Unit | JobSpec → RayJob manifest, auth and team scoping, reconciler, CLI (fake K8s client) | `make test` | ✅ |
+| Integration | Submit / status / logs / cancel against kind | `make test-k8s` | ✅ |
 | Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh` | 🚧 |
 | Tenancy | Noisy neighbour: team-b unaffected by team-a saturation | `scripts/noisy_neighbour.sh` | 🚧 |
 | Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` | 🚧 |
@@ -210,7 +227,7 @@ These will be filled in from real runs. No numbers until they're measured.
 | Work lost when a worker is killed mid-epoch | TBD (target: ≤ 1 epoch) |
 | Team-b queue time while team-a is saturated | TBD |
 | Serve replicas under load / p50 latency | TBD |
-| Peak stack RAM | 3.9 GiB for the Phase 1 hello RayJob (head + 2 workers + kind + operator); training TBD (budget: 7 GB) |
+| Peak stack RAM | 4.5 GiB for the hello job via the API (head 2 Gi + 2 workers + kind + operator; it was 3.9 GiB in Phase 1 with a 1.5 Gi head); training TBD (budget: 7 GB) |
 
 ## 13. What production would change
 
@@ -221,8 +238,8 @@ See [ARCHITECTURE.md §9](ARCHITECTURE.md#9-production-gaps-deliberately-not-bui
 ## 14. Repo layout
 
 ```
-platform_api/   FastAPI service            🚧    infra/versions.env  pinned versions   ✅
-sdk/            Python SDK + rkp CLI       🚧    infra/kind, k8s, helm  cluster, operator  ✅
+platform_api/   FastAPI service            ✅    infra/versions.env  pinned versions   ✅
+sdk/            Python SDK + rkp CLI       ✅    infra/kind, k8s, helm  cluster, operator  ✅
 workloads/      Ray Train + Ray Serve      🚧    scripts/            tools, diagrams   ✅
 docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest            ✅
 ```
@@ -233,6 +250,6 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 |---|---|---|---|
 | 0 Bootstrap | ✅ | 5 Ray Serve | 🚧 |
 | 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | 🚧 |
-| 2 API + SDK | 🚧 | 7 Observability + cost | 🚧 |
+| 2 API + SDK | ✅ | 7 Observability + cost | 🚧 |
 | 3 Distributed training | 🚧 | 8 GPU awareness | 🚧 |
 | 4 Lifecycle | 🚧 | 9 Polish + full case study | 🚧 |

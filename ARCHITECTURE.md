@@ -30,24 +30,32 @@ Everything runs on a **2-core / 15 GB laptop**.
 ## 3. Components
 
 ### 3.1 platform_api (FastAPI)
-- **Auth:** `X-API-Key` → `team` → namespace `team-<name>`. Keys live in a git-ignored YAML file.
-  Every handler gets its namespace from the key, never from the request body.
+- **Auth:** `X-API-Key` → `team`, and the team name is its namespace (`team-a`). Keys live in the git-ignored
+  `config/api_keys.yaml` (`make keys`). Every handler gets its namespace from the key, never from the request
+  body. Another team's job returns 403.
 - **Endpoints:** `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/logs`,
   `DELETE /jobs/{id}` (cancel), `POST /services`, `DELETE /services/{name}`, `GET /metrics`, `GET /healthz`.
 - **`k8s.py`:** the only module that talks to Kubernetes (`CustomObjectsApi` for `ray.io/v1`
   RayJob/RayService, `CoreV1Api` for pod logs and quotas). It sits behind a protocol so tests can use a fake.
 - **Registry (SQLite):** one source of truth for job history. CRs are short-lived, but the registry keeps the record.
-- **Reconciler:** an asyncio task that polls RayJob status every 5s and records state transitions with
-  timestamps. This is where `queue_seconds = started_at - submitted_at` comes from.
+- **Reconciler:** an asyncio task that polls RayJob status every 5s and records state transitions.
+  `started_at`/`finished_at` come from `status.rayJobInfo` (Ray's own times), so `queue_seconds =
+  started_at - submitted_at` is right even for jobs shorter than a poll. On a terminal state it copies the
+  submitter pod's logs (which tail the driver) into SQLite, then deletes the RayJob.
 
 ### 3.2 SDK / CLI (`sdk/`)
-A thin `httpx` client plus a Typer CLI (`rkp`). The CLI reads the API URL and key from env or `~/.config/rkp.toml`.
+A thin `httpx` client plus a Typer CLI (`rkp`). The CLI reads the API URL and key from env (`RKP_API_URL`,
+`RKP_API_KEY`) or a TOML file (`RKP_CONFIG`, else `~/.config/rkp.toml`, else the repo's `config/rkp.toml`).
+`--team` picks which key from the file to use.
 
 ### 3.3 Ray runtime image (`docker/`)
 One image for every workload: `rayproject/ray:<pinned>-py312-cpu` with CPU-only torch,
 transformers and datasets baked in. Built once and `kind load`ed. Workloads never `pip install` at runtime,
-so there are no slow starts and no network dependence. User code is shipped through RayJob
-`runtimeEnvYAML.working_dir` (a zipped dir, limited to small scripts).
+so there are no slow starts and no network dependence. User code (a script or a flat directory, ≤ 512 KiB)
+is sent inline to the API, which stores it in a ConfigMap owned by the RayJob. It's mounted at
+`/home/ray/rkp-code` on the head and workers (on `PYTHONPATH`), and the entrypoint runs as
+`env -C /home/ray/rkp-code <cmd>`. KubeRay's submitter puts the entrypoint through a shell, so shell
+operators (`&& ; |` …) are rejected.
 
 ### 3.4 Training workload (`workloads/train/`)
 - `TorchTrainer` with `ScalingConfig(num_workers=2, use_gpu=False, resources_per_worker={"CPU": 1})`.
@@ -72,8 +80,8 @@ SUBMITTED ──► PENDING (pods waiting: quota / capacity) ──► RUNNING �
 | Checkpointing | `ray.train.report(metrics, checkpoint=...)` every epoch → `RunConfig(storage_path="/shared/checkpoints/<team>/<job>")`, `CheckpointConfig(num_to_keep=2)` |
 | Resume after worker loss | `FailureConfig(max_failures=3)`. The training loop calls `ray.train.get_checkpoint()` and restores model, optimizer and epoch |
 | Retry failed jobs | RayJob `spec.backoffLimit = retries`. Each retry starts a new cluster, and the same `storage_path` + run name means it resumes from the checkpoint |
-| Cancellation | API deletes the RayJob CR (the operator tears down the RayCluster), and the registry marks it `CANCELLED` |
-| Cleanup | `shutdownAfterJobFinishes: true`, `ttlSecondsAfterFinished: 60` |
+| Cancellation | API saves the logs so far, deletes the RayJob CR (owner references remove the RayCluster, submitter Job and code ConfigMap), and the registry marks it `CANCELLED` |
+| Cleanup | The reconciler deletes finished RayJobs after saving their logs. `shutdownAfterJobFinishes: true` and `ttlSecondsAfterFinished: 60` are the safety net |
 
 Checkpoints sit on a hostPath, so they survive pod death and cluster recreation. On a single
 node that's equivalent to shared storage. In production this would be S3/GCS (§9).
@@ -98,13 +106,13 @@ The node has about 4 vCPU and 15 GB. The stack target is **≤ 3 CPU requested a
 |---|---|---|---|
 | kind control plane | ~0.5 | ~1.2 GB | single node, no workers |
 | KubeRay operator | 0.1 | 256 Mi | |
-| Ray head (per cluster) | 0.5 | 1.5 Gi | `num-cpus: 0`, so no tasks run on the head |
+| Ray head (per cluster) | 0.25 | 2 Gi | `num-cpus: 0`, so no tasks run on the head. 1.5 Gi was too little once the driver ran there |
 | Ray worker × 2 | 1 each | 1.5 Gi each | `tiny` profile; `distilbert` needs about 2.5 Gi each |
 | Prometheus | 0.1 | 512 Mi | 6h retention, 30s scrape |
 | Grafana | 0.1 | 256 Mi | |
 | kube-state-metrics | 0.05 | 128 Mi | |
 | platform_api (host) | – | ~150 MB | uvicorn, outside the cluster |
-| **Total (one training job + monitoring)** | **~3.3** | **~6.8 GB** | |
+| **Total (one training job + monitoring)** | **~3.1** | **~7.5 GB** | Sum of limits, which are ceilings. The measured peak (Phase 2 hello job, no monitoring) is 4.5 GiB. Phase 3 must measure training against the 7 GB target |
 
 Rules: one RayCluster at a time, except in the multi-tenancy demo, which uses 1 worker per team.
 Turn monitoring off when you don't need it (`make monitoring-down`).

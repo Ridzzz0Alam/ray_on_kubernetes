@@ -48,20 +48,25 @@ dashboard polish (keep the raw metrics and the cost report) → Serve load-test 
 - [x] The cluster is cleaned up after the job (`shutdownAfterJobFinishes: true`)
 - [x] Peak RAM for the whole stack stays under 5 GB (`docker stats`): measured 3.9 GiB peak, 1.0 GiB idle
 
-## Phase 2: Submission API + SDK (Sat afternoon)
+## Phase 2: Submission API + SDK (Sat afternoon) ✅
 
-- [ ] FastAPI: `POST /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/logs`, `DELETE /jobs/{id}`, `GET /jobs`
-- [ ] Auth: `X-API-Key` → team → namespace (keys in a git-ignored config file)
-- [ ] Job registry in SQLite (id, team, spec, state, submitted_at, started_at, finished_at)
-- [ ] A reconciler loop that syncs RayJob status into the registry
-- [ ] Build the RayJob manifest from a Pydantic `JobSpec` (entrypoint, workers, cpu, memory, custom resources, retries)
-- [ ] SDK + `rkp` CLI: `submit | status | logs | cancel | list`
-- [ ] Unit tests with a fake K8s client
+- [x] FastAPI: `POST /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/logs`, `DELETE /jobs/{id}`, `GET /jobs`
+- [x] Auth: `X-API-Key` → team → namespace (keys in a git-ignored config file)
+- [x] Job registry in SQLite (id, team, spec, state, submitted_at, started_at, finished_at)
+- [x] A reconciler loop that syncs RayJob status into the registry
+- [x] Build the RayJob manifest from a Pydantic `JobSpec` (entrypoint, workers, cpu, memory, custom resources, retries)
+- [x] SDK + `rkp` CLI: `submit | status | logs | cancel | list`
+- [x] Unit tests with a fake K8s client
 
 **Acceptance**
-- [ ] `rkp submit --team team-a workloads/hello.py` → RUNNING → SUCCEEDED
-- [ ] `rkp logs <id>` shows the driver logs. `rkp cancel <id>` makes the state CANCELLED
-- [ ] A team-b key cannot read or cancel team-a's jobs (403), and there's a test for this
+- [x] `rkp submit --team team-a workloads/hello.py` → RUNNING → SUCCEEDED
+- [x] `rkp logs <id>` shows the driver logs. `rkp cancel <id>` makes the state CANCELLED
+- [x] A team-b key cannot read or cancel team-a's jobs (403), and there's a test for this
+
+**Result (2026-11-23):** `rkp submit` went SUBMITTED → PENDING (2s) → RUNNING (42s) → SUCCEEDED (62s), with
+6 tasks spread over both workers. Node peak was 4.49 GiB. Cancelling a RUNNING job took it to CANCELLED, and
+everything in `team-a` was gone 10s later. Team-b got 403 on GET, logs and DELETE. Tests: 43 unit, plus 2
+`@pytest.mark.k8s` (`make test-k8s`, 1m45s).
 
 ## Phase 3: Distributed training with Ray Train (Sat afternoon)
 
@@ -163,3 +168,10 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-14 | Pins: kind v0.33.0 (node v1.37.0), kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 / py3.12 | Prefer releases at least 2 weeks old. Skipped Helm 4.3.2 (1 day old) and Ray 2.60.0 (10 days old) |
 | 2026-11-20 | Image `rkp-ray:2.59.0-1`: torch 2.15.0 (CPU index), transformers 5.22.2, datasets 5.1.0 | Newest releases at least 2 weeks old. CPU wheel index avoids about 2 GB of CUDA libraries. Tag suffix `-N` is bumped when deps change |
 | 2026-11-20 | Node image pinned via `kind create --image`, not in `cluster.yaml` | Keeps `infra/versions.env` the single source of truth |
+| 2026-11-23 | User code ships in a ConfigMap (owned by the RayJob) mounted on head + workers, not `runtimeEnvYAML.working_dir` | No upload step from the submitter pod. Deleting the RayJob garbage-collects it. Limit 512 KiB of flat files, enough for scripts |
+| 2026-11-23 | Entrypoint is `env -C <code dir> <cmd>`, and shell metacharacters are rejected | KubeRay's submitter runs the entrypoint through a shell: `cd x && python y` ran only `cd` on Ray and the rest in the submitter pod |
+| 2026-11-23 | Reconciler stores the driver logs in SQLite, then deletes the finished RayJob | Fixes the CRs left over in Phase 1 without losing logs |
+| 2026-11-23 | `started_at` / `finished_at` come from `status.rayJobInfo`, not from poll time | A job shorter than the 5s poll still gets correct times, which queue-time metrics need |
+| 2026-11-23 | Ray head memory 1.5 Gi → 2 Gi | At 1.5 Gi, Ray's memory monitor killed the JobSupervisor on the head (1.44 GB used) |
+| 2026-11-23 | Team name = namespace (`team-a`). `--team` picks the client key, and the server only trusts the key | Simple mapping. Nothing in the request body can choose a namespace (extra fields → 422) |
+| 2026-11-23 | Python deps resolved with `uv lock --exclude-newer 2026-11-09` | Same "at least 2 weeks old" rule as the other pins. Ruff stays on 0.17.5 from Phase 0 |

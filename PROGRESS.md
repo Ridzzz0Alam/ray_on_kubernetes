@@ -6,6 +6,38 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-23: Phase 2 complete (API + SDK + CLI)
+
+**Done**
+- `platform_api/`: FastAPI (`POST/GET /jobs`, `GET /jobs/{id}`, `/logs`, `DELETE`, `/healthz`), with `X-API-Key` → team (= namespace).
+  The SQLite registry is `.rkp/registry.db`. The reconciler polls every 5s. `k8s.py` is the only K8s module (`KubeClient` protocol).
+  Logs are JSON.
+- `sdk/`: `Client` (httpx) and the `rkp` CLI (`submit | status | logs | cancel | list`, plus `--wait`). The project is now a
+  hatchling package (`[project.scripts] rkp`).
+- `make teams` (namespaces only, quotas come in Phase 6), `make keys` (git-ignored `config/api_keys.yaml` + `config/rkp.toml`),
+  `make api`, `make test-k8s`. Added `workloads/hello.py`.
+- Tests: 43 unit tests (fake K8s), plus 2 `k8s` tests (submit→SUCCEEDED with logs and cleanup, and cancel while RUNNING).
+
+**Measured:** hello via the CLI went PENDING 2s → RUNNING 42s → SUCCEEDED 62s. Node peak 4.49 GiB. Cancel → CANCELLED,
+and the namespace was empty within 10s. Team-b got 403 on GET, logs and DELETE. `make test-k8s` takes 1m45s.
+
+**State:** the cluster is deleted (`make down`). The API is stopped. The dev registry `.rkp/` was deleted. The dev keys in `config/` stay (git-ignored).
+
+**Next: Phase 3** (Ray Train, see PLAN.md). Run `make up && make teams`, then `make api` in another terminal. Training code goes in
+`workloads/train/` as a flat dir, submitted with `rkp submit workloads/train --script train.py`. Measure the RAM peak against the 7 GB budget.
+
+**Gotchas**
+- **KubeRay's submitter runs the entrypoint through a shell.** `cd x && python y` ran only `cd` on Ray, and the job still
+  "succeeded". The API now rejects `; & | < > $` and backticks, and uses `env -C <dir> <cmd>`.
+- A head limit of 1.5 Gi OOM-killed the JobSupervisor (Ray's memory monitor). The head is now 2 Gi.
+- A job shorter than the 5s poll skips RUNNING in `rkp --wait` output, but `started_at` still comes from `status.rayJobInfo`.
+- FastAPI + `from __future__ import annotations` + `Annotated` aliases defined inside `create_app` → params silently become
+  query params (422). `main.py` doesn't use the future import.
+- `uv lock --exclude-newer` re-resolves everything. Check that existing pins didn't move (ruff went down to 0.17.4 and had to be restored).
+- Driver logs start with a transient "infeasible resource requests" line: the driver starts before the workers join. It's harmless.
+
+---
+
 ## 2026-11-20: Phase 1 complete (cluster + hello RayJob)
 
 **Done**
