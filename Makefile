@@ -5,8 +5,11 @@ include infra/versions.env
 CLUSTER     := rkp
 KUBECTX     := kind-$(CLUSTER)
 KUBERAY_REPO := https://ray-project.github.io/kuberay-helm/
+TEAMS       := team-a team-b
+PROFILE     ?= tiny
+UIDGID      := $(shell id -u):$(shell id -g)
 
-.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api
+.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api data
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -62,8 +65,15 @@ hello: ## Phase 1 smoke test: run the hello RayJob and wait for SUCCEEDED
 	kubectl --context $(KUBECTX) wait rayjob/hello --for=jsonpath='{.status.jobStatus}'=SUCCEEDED --timeout=10m
 	kubectl --context $(KUBECTX) logs -l job-name=hello --tail=20
 
-teams: ## Create the team namespaces (quotas come in Phase 6)
+teams: ## Create the team namespaces + their checkpoint dirs (quotas come in Phase 6)
+	mkdir -p .shared/data $(addprefix .shared/checkpoints/,$(TEAMS))
 	kubectl --context $(KUBECTX) apply -f infra/k8s/teams/
+
+data: ## Download + tokenize the training data/model once into .shared/data (PROFILE=tiny|distilbert)
+	mkdir -p .shared/data
+	docker run --rm --user $(UIDGID) --env HF_HOME=/shared/data/.hf-cache \
+		--volume $(CURDIR)/.shared:/shared --volume $(CURDIR)/workloads/train:/w:ro --workdir /w \
+		$(RKP_IMAGE) python prepare_data.py --profile $(PROFILE)
 
 keys: ## Generate dev API keys: config/api_keys.yaml (server) + config/rkp.toml (CLI)
 	uv run python scripts/gen_keys.py
