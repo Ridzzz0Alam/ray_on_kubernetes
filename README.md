@@ -102,11 +102,25 @@ Most of the 42s in PENDING is pod start-up for the head and workers on 2 cores.
 
 ![Job lifecycle](docs/diagrams/job-lifecycle.svg)
 
-## 5. Distributed training and fault tolerance 🚧
+## 5. Distributed training and fault tolerance (training ✅, fault tolerance 🚧)
 
 The training workload is a sentiment classifier on an Amazon reviews subset (about 4k train / 1k eval).
 `TorchTrainer` runs 2 workers on the CPU `gloo` backend, with `torch.set_num_threads(1)` per worker so they
 don't fight over 2 physical cores. The default model is `prajjwal1/bert-tiny` (about 4M params), and DistilBERT is opt-in.
+
+```console
+$ make data      # once: download + tokenize into .shared/data (~1 min); training pods never hit the network
+$ rkp submit --team team-a workloads/train --script train.py -- --profile tiny --epochs 2
+[    0s] SUBMITTED
+[    6s] PENDING
+[   40s] RUNNING
+[  146s] SUCCEEDED  (Job finished successfully.)
+$ rkp logs <id> | grep 'rank 0'
+[rank 0] {'epoch': 1, 'train_loss': 0.5165, 'eval_loss': 0.3447, 'eval_accuracy': 0.851, 'epoch_seconds': 35.8}
+[rank 0] {'epoch': 2, 'train_loss': 0.2303, 'eval_loss': 0.3455, 'eval_accuracy': 0.853, 'epoch_seconds': 35.7}
+```
+
+The fault-tolerance mechanisms below are Phase 4.
 
 Fault tolerance has two layers:
 
@@ -191,6 +205,7 @@ API + CLI (Phase 2):
 
 ```bash
 make teams       # team-a / team-b namespaces (quotas come in Phase 6)
+make data        # training data + model → .shared/data (once; PROFILE=distilbert for the big one)
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
@@ -222,12 +237,12 @@ These will be filled in from real runs. No numbers until they're measured.
 
 | Measure | Result |
 |---|---|
-| Training time, `tiny`, 2 workers, 2 epochs | TBD |
-| Eval accuracy | TBD |
+| Training time, `tiny`, 2 workers, 2 epochs | 97s of training (~35s/epoch); 2m27s from submit to SUCCEEDED |
+| Eval accuracy | 85.3% on 1k held-out reviews (85.1% after epoch 1) |
 | Work lost when a worker is killed mid-epoch | TBD (target: ≤ 1 epoch) |
 | Team-b queue time while team-a is saturated | TBD |
 | Serve replicas under load / p50 latency | TBD |
-| Peak stack RAM | 4.5 GiB for the hello job via the API (head 2 Gi + 2 workers + kind + operator; it was 3.9 GiB in Phase 1 with a 1.5 Gi head); training TBD (budget: 7 GB) |
+| Peak stack RAM | 6.9 GiB for `tiny` training (head 2.76 + 2 × 1.33 GiB workers + kind + operator, counted as Ray does, without page cache), against a 7 GB budget. Monitoring isn't included yet |
 
 ## 13. What production would change
 
@@ -251,5 +266,5 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 | 0 Bootstrap | ✅ | 5 Ray Serve | 🚧 |
 | 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | 🚧 |
 | 2 API + SDK | ✅ | 7 Observability + cost | 🚧 |
-| 3 Distributed training | 🚧 | 8 GPU awareness | 🚧 |
+| 3 Distributed training | ✅ | 8 GPU awareness | 🚧 |
 | 4 Lifecycle | 🚧 | 9 Polish + full case study | 🚧 |

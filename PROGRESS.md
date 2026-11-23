@@ -6,6 +6,34 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-23: Phase 3 complete (Ray Train)
+
+**Done**
+- `workloads/train/`: `profiles.py` (tiny/distilbert, with pinned HF SHAs), `prepare_data.py` (`make data`) and `train.py`
+  (`TorchTrainer`, 2 workers on gloo, `set_num_threads(1)`, per-epoch all_reduce eval, `ray.train.report`).
+- The API now mounts `/shared/data` (ro) and `/shared/checkpoints/<team>` → `/shared/checkpoints` on head and workers,
+  and sets `RKP_JOB_ID`/`RKP_TEAM`/`RKP_STORAGE`/`RKP_DATA`. `make teams` also creates the checkpoint dirs.
+- Head 2 Gi → 3 Gi. Default worker memory 1 Gi → 1536Mi. The reconciler keeps RUNNING while Ray says done but KubeRay doesn't yet.
+- Tests: 45 unit tests, and `make test-k8s` (2) still passes.
+
+**Measured:** 85.3% eval accuracy after 2 epochs (85.1% after 1). 97s of training. Submit → SUCCEEDED in 2m27s.
+Peak (Ray's count, without page cache): head 2.76 GiB, worker 1.33 GiB, node **6.9 GiB**.
+
+**State:** the cluster is deleted. `.shared/data` (62 MB, git-ignored) stays, so you don't need `make data` again.
+
+**Next: Phase 4** (checkpoint/resume/retry/cancel). `train.py` already has `storage_path`/`name`. Add checkpoints
+with `ray.train.report(metrics, checkpoint=...)` and resume with `get_checkpoint()`. With checkpoints, `result.metrics` gets filled.
+
+**Gotchas**
+- **The memory budget is tight:** 6.9 GiB node peak for tiny training, before monitoring. Phase 7 has to keep Prometheus/Grafana minimal.
+- The head is the memory hog: ~10 dashboard subprocesses plus Train V2's 0-CPU helper actors all land there. `ray start` can't turn dashboard modules off.
+- Measure memory the way Ray does (`memory.current − active_file − inactive_file`). `docker stats` and raw `memory.current` include page cache and look about 0.3 to 0.4 GB worse.
+- `bert-tiny` on HF has no `model_type` or tokenizer config. `prepare_data.py` loads it with the Bert* classes and re-saves it complete.
+- Agent shells: the Claude Code safety check blocks inline docker commands that combine the auto-remove flag with
+  `$$(...)` substitution. Use `make data` (it uses `$(shell id -u)`) rather than typing the docker command by hand.
+
+---
+
 ## 2026-11-23: Phase 2 complete (API + SDK + CLI)
 
 **Done**

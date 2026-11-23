@@ -68,16 +68,21 @@ dashboard polish (keep the raw metrics and the cost report) → Serve load-test 
 everything in `team-a` was gone 10s later. Team-b got 403 on GET, logs and DELETE. Tests: 43 unit, plus 2
 `@pytest.mark.k8s` (`make test-k8s`, 1m45s).
 
-## Phase 3: Distributed training with Ray Train (Sat afternoon)
+## Phase 3: Distributed training with Ray Train (Sat afternoon) ✅
 
-- [ ] `workloads/train/train.py`: `TorchTrainer` with 2 workers and a CPU/gloo backend, `torch.set_num_threads(1)`
-- [ ] Profiles: `tiny` (default, `prajjwal1/bert-tiny`) and `distilbert` (opt-in)
-- [ ] Data: an Amazon reviews sentiment subset (about 4k train / 1k eval, max_len 128), cached to `/shared/data`
-- [ ] Report loss/accuracy each epoch with `ray.train.report`
+- [x] `workloads/train/train.py`: `TorchTrainer` with 2 workers and a CPU/gloo backend, `torch.set_num_threads(1)`
+- [x] Profiles: `tiny` (default, `prajjwal1/bert-tiny`) and `distilbert` (opt-in)
+- [x] Data: an Amazon reviews sentiment subset (about 4k train / 1k eval, max_len 128), cached to `/shared/data`
+- [x] Report loss/accuracy each epoch with `ray.train.report`
 
 **Acceptance**
-- [ ] `tiny` trains 2 epochs across 2 workers in under 10 min, with eval accuracy above 75%
-- [ ] Submitted through `rkp submit`
+- [x] `tiny` trains 2 epochs across 2 workers in under 10 min, with eval accuracy above 75%
+- [x] Submitted through `rkp submit`
+
+**Result (2026-11-23):** `rkp submit --team team-a workloads/train --script train.py -- --profile tiny --epochs 2`
+reached SUCCEEDED in 2m27s: about 40s of pod start-up, then 97s of training at about 35s per epoch. Eval accuracy
+was 85.1% after epoch 1 and 85.3% after epoch 2 (seed 0, the same in 4 runs). Peak memory, measured the way Ray
+counts it (cgroup minus page cache): head 2.76 GiB, workers 1.33 GiB each, node 6.9 GiB.
 
 ## Phase 4: Lifecycle (checkpoint, resume, retry, cancel) (Sat evening)
 
@@ -174,4 +179,9 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-23 | `started_at` / `finished_at` come from `status.rayJobInfo`, not from poll time | A job shorter than the 5s poll still gets correct times, which queue-time metrics need |
 | 2026-11-23 | Ray head memory 1.5 Gi → 2 Gi | At 1.5 Gi, Ray's memory monitor killed the JobSupervisor on the head (1.44 GB used) |
 | 2026-11-23 | Team name = namespace (`team-a`). `--team` picks the client key, and the server only trusts the key | Simple mapping. Nothing in the request body can choose a namespace (extra fields → 422) |
+| 2026-11-23 | `make data` downloads and tokenizes once inside the Ray image into `.shared/data`. Pods mount it read-only, and training runs offline | No network or HF downloads at pod start. Model and dataset revisions are pinned by commit SHA in `workloads/train/profiles.py` |
+| 2026-11-23 | Every job gets `/shared/data` (read-only) and `/shared/checkpoints` = hostPath `/shared/checkpoints/<team>`, plus `RKP_JOB_ID` / `RKP_TEAM` / `RKP_STORAGE` | Ray Train V2 needs a `storage_path` shared by all nodes. A per-team subdir keeps teams out of each other's checkpoints. `make teams` creates the dirs as uid 1000 (= the image's `ray` user) |
+| 2026-11-23 | Ray head memory 2 Gi → 3 Gi | At 2 Gi a training job was OOM-killed by Ray's memory monitor (1.91 GB). Measured during training: 2.69 GB anon, across 31 processes: driver + TrainController (each ~0.4 GB with torch), 4 Train V2 helper actors (~0.2 GB each, 0 CPU, so they land on the head) and ~10 dashboard module subprocesses. `ray start` can't disable dashboard modules |
+| 2026-11-23 | Default worker memory 1 Gi → 1.5 Gi | A Ray Train worker with torch + transformers peaked at 1.33 GB |
+| 2026-11-23 | `bert-tiny` lr 1e-3, batch 32, linear decay | It reached 85% on the first try. bert-tiny tolerates a high learning rate |
 | 2026-11-23 | Python deps resolved with `uv lock --exclude-newer 2026-11-09` | Same "at least 2 weeks old" rule as the other pins. Ruff stays on 0.17.5 from Phase 0 |

@@ -61,7 +61,13 @@ operators (`&& ; |` …) are rejected.
 - `TorchTrainer` with `ScalingConfig(num_workers=2, use_gpu=False, resources_per_worker={"CPU": 1})`.
 - `torch.set_num_threads(1)` per worker, so 2 workers don't fight over 2 physical cores.
 - Profiles: `tiny` = `prajjwal1/bert-tiny` (about 4M params, default), `distilbert` (opt-in, slow).
-- Data: Amazon reviews sentiment subset, tokenized once and cached to `/shared/data`.
+  Model and dataset revisions are pinned by commit SHA in `profiles.py`.
+- Data: `fancyzhx/amazon_polarity`, a shuffled 4k train / 1k eval subset (max_len 128). `make data` streams it and
+  tokenizes it once inside the Ray image into `/shared/data`, so jobs train offline.
+- Each worker evaluates its shard of the eval set, then an `all_reduce` gives global loss/accuracy.
+  `ray.train.report` runs every epoch.
+- Storage: the API mounts `/shared/data` read-only and the team's `/shared/checkpoints/<team>` at
+  `/shared/checkpoints` on head and workers. `RunConfig(storage_path=$RKP_STORAGE, name=$RKP_JOB_ID)`.
 
 ### 3.5 Serving workload (`workloads/serve/`)
 A Ray Serve deployment that loads the latest checkpoint for a given team/job. It's deployed as a `RayService`
@@ -106,13 +112,13 @@ The node has about 4 vCPU and 15 GB. The stack target is **≤ 3 CPU requested a
 |---|---|---|---|
 | kind control plane | ~0.5 | ~1.2 GB | single node, no workers |
 | KubeRay operator | 0.1 | 256 Mi | |
-| Ray head (per cluster) | 0.25 | 2 Gi | `num-cpus: 0`, so no tasks run on the head. 1.5 Gi was too little once the driver ran there |
-| Ray worker × 2 | 1 each | 1.5 Gi each | `tiny` profile; `distilbert` needs about 2.5 Gi each |
+| Ray head (per cluster) | 0.25 | 3 Gi | `num-cpus: 0`, so no tasks run on the head, but the driver, TrainController and Train V2 helper actors do. Measured 2.76 GiB during training |
+| Ray worker × 2 | 1 each | 1.5 Gi each | `tiny` profile, measured 1.33 GiB; `distilbert` needs about 2.5 Gi each |
 | Prometheus | 0.1 | 512 Mi | 6h retention, 30s scrape |
 | Grafana | 0.1 | 256 Mi | |
 | kube-state-metrics | 0.05 | 128 Mi | |
 | platform_api (host) | – | ~150 MB | uvicorn, outside the cluster |
-| **Total (one training job + monitoring)** | **~3.1** | **~7.5 GB** | Sum of limits, which are ceilings. The measured peak (Phase 2 hello job, no monitoring) is 4.5 GiB. Phase 3 must measure training against the 7 GB target |
+| **Total (one training job + monitoring)** | **~3.1** | **~8.5 GB** | Sum of limits, which are ceilings. Measured: **6.9 GiB for `tiny` training with no monitoring**, already near the 7 GB target. Phase 7 must keep monitoring small or turn it on only for demos |
 
 Rules: one RayCluster at a time, except in the multi-tenancy demo, which uses 1 worker per team.
 Turn monitoring off when you don't need it (`make monitoring-down`).
