@@ -1,0 +1,5 @@
+# Copy to config/api_keys.yaml (git-ignored), or run `make keys` to generate random keys.
+# The team name is also its Kubernetes namespace.
+teams:
+  team-a: replace-with-a-long-random-key-a
+  team-b: replace-with-a-long-random-key-b

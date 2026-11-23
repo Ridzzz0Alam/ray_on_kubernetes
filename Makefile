@@ -6,10 +6,10 @@ CLUSTER     := rkp
 KUBECTX     := kind-$(CLUSTER)
 KUBERAY_REPO := https://ray-project.github.io/kuberay-helm/
 
-.PHONY: help tools sync lint fmt test check diagrams up down image load hello
+.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api
 
 help: ## Show available targets
-	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
+	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
 
 tools: ## Install pinned kind/kubectl/helm into ~/.local/bin
 	bash scripts/install-tools.sh
@@ -27,6 +27,9 @@ fmt: ## Auto-fix lint and format
 
 test: ## Unit tests (no cluster needed)
 	uv run pytest -m "not k8s"
+
+test-k8s: ## Integration tests against the running kind cluster (make up && make teams first)
+	uv run pytest -m k8s
 
 check: lint test ## What CI runs
 
@@ -58,3 +61,12 @@ hello: ## Phase 1 smoke test: run the hello RayJob and wait for SUCCEEDED
 	kubectl --context $(KUBECTX) apply -f infra/k8s/examples/hello-rayjob.yaml
 	kubectl --context $(KUBECTX) wait rayjob/hello --for=jsonpath='{.status.jobStatus}'=SUCCEEDED --timeout=10m
 	kubectl --context $(KUBECTX) logs -l job-name=hello --tail=20
+
+teams: ## Create the team namespaces (quotas come in Phase 6)
+	kubectl --context $(KUBECTX) apply -f infra/k8s/teams/
+
+keys: ## Generate dev API keys: config/api_keys.yaml (server) + config/rkp.toml (CLI)
+	uv run python scripts/gen_keys.py
+
+api: ## Run the platform API on 127.0.0.1:8000 (uses the kind-rkp kube context)
+	uv run uvicorn --factory platform_api.main:create_app --host 127.0.0.1 --port 8000 --no-access-log
