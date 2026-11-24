@@ -304,3 +304,55 @@ def test_serve_latest_checkpoint_then_delete(api: tuple[TestClient, RealKube]) -
         if http.get("/services").json():
             http.delete("/services/e2e")
         shutil.rmtree(CHECKPOINTS / job_id, ignore_errors=True)
+
+
+def test_gpu_job_waits_for_the_sim_gpu_while_cpu_jobs_run(
+    api: tuple[TestClient, RealKube],
+) -> None:
+    """Phase 8: the node has one sim GPU (`make teams` -> `make gpu-sim`). team-a holds it;
+    team-b's GPU job is admitted but stays PENDING (scheduler: Insufficient example.com/gpu)
+    while team-b's CPU job runs and succeeds; then the GPU job gets the GPU and succeeds."""
+    http, kube = api
+    b = {"X-API-Key": KEY_B}
+    gpu_code = {"gpu_sim.py": (ROOT / "workloads" / "gpu_sim.py").read_text()}
+    gpu = {"files": gpu_code, "workers": 0, "gpus": 1, "memory": "640Mi"}
+    hold = http.post("/jobs", json={**gpu, "entrypoint": "python gpu_sim.py 90"}).json()
+    jobs = [(hold, None)]
+    try:
+        assert wait_for(http, hold["id"], {"RUNNING"})["state"] == "RUNNING"
+        b_gpu = http.post(
+            "/jobs", json={**gpu, "entrypoint": "python gpu_sim.py 12"}, headers=b
+        ).json()
+        b_cpu = http.post(
+            "/jobs",
+            json={
+                "entrypoint": "python hello.py",
+                "files": {"hello.py": HELLO},
+                "workers": 1,
+                "memory": "512Mi",
+            },
+            headers=b,
+        ).json()
+        jobs += [(b_gpu, b), (b_cpu, b)]
+        assert b_gpu["state"] == b_cpu["state"] == "SUBMITTED"  # both fit team-b's quota
+
+        done_cpu = wait_for(http, b_cpu["id"], DONE, headers=b)
+        assert done_cpu["state"] == "SUCCEEDED", done_cpu["message"]
+        waiting = http.get(f"/jobs/{b_gpu['id']}", headers=b).json()
+        if http.get(f"/jobs/{hold['id']}").json()["state"] == "RUNNING":
+            # Still blocked on the node's only GPU, and the reason is surfaced.
+            assert waiting["state"] == "PENDING", waiting
+            assert "Insufficient example.com/gpu" in (waiting["message"] or ""), waiting
+
+        done_gpu = wait_for(http, b_gpu["id"], DONE, timeout=420, headers=b)
+        assert done_gpu["state"] == "SUCCEEDED", done_gpu["message"]
+        assert done_gpu["message"] != waiting["message"]  # the stale reason was cleared
+        logs = http.get(f"/jobs/{b_gpu['id']}/logs", headers=b).text
+        assert "'sim_gpu': 1.0" in logs and "gpu-sim-worker" in logs
+    finally:
+        for job, headers in jobs:
+            if http.get(f"/jobs/{job['id']}", headers=headers).json()["state"] not in DONE:
+                http.delete(f"/jobs/{job['id']}", headers=headers)
+        for job, headers in jobs:
+            team = "team-b" if headers else "team-a"
+            assert pods_gone(kube, job["id"], team=team)
