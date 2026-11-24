@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from platform_api.models import Resources
+
 
 class FakeKube:
     def __init__(self) -> None:
@@ -12,6 +14,7 @@ class FakeKube:
         self.configmaps: dict[tuple[str, str], dict[str, Any]] = {}
         self.logs: dict[tuple[str, str], str] = {}
         self.deleted: list[tuple[str, str]] = []
+        self.quotas: dict[str, Resources] = {}  # namespace -> hard requests; none = unlimited
 
     def create_rayjob(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
         obj = {**body, "metadata": {**body["metadata"], "uid": str(uuid.uuid4())}}
@@ -34,6 +37,9 @@ class FakeKube:
         if logs is not None and tail_lines:
             return "\n".join(logs.splitlines()[-tail_lines:])
         return logs
+
+    def get_quota(self, namespace: str) -> Resources | None:
+        return self.quotas.get(namespace)
 
     # test helper: what the KubeRay operator would write
     def set_status(

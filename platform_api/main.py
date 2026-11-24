@@ -13,10 +13,10 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from platform_api.admission import Admitter, QuotaExceeded
 from platform_api.config import Settings
 from platform_api.k8s import KubeClient, KubeError, RealKube
 from platform_api.logs import setup_logging
-from platform_api.manifests import build_code_configmap, build_rayjob, k8s_name
 from platform_api.models import TERMINAL, Job, JobSpec, JobState
 from platform_api.reconciler import run_forever
 from platform_api.registry import Registry
@@ -34,12 +34,15 @@ def create_app(
     setup_logging()
     kube = kube or RealKube(settings.kube_context)
     registry = Registry(settings.db_path)
+    admitter = Admitter(registry, kube, image=settings.image, ray_version=settings.ray_version)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = None
         if run_reconciler:
-            task = asyncio.create_task(run_forever(registry, kube, settings.reconcile_interval))
+            task = asyncio.create_task(
+                run_forever(registry, kube, admitter, settings.reconcile_interval)
+            )
         yield
         if task:
             task.cancel()
@@ -49,6 +52,7 @@ def create_app(
     app = FastAPI(title="rkp platform API", version="0.1.0", lifespan=lifespan)
     app.state.registry = registry
     app.state.kube = kube
+    app.state.admitter = admitter
 
     def team_of(x_api_key: Annotated[str | None, Header()] = None) -> str:
         """The key decides the team, and the team is the namespace. Never trust the body."""
@@ -81,21 +85,16 @@ def create_app(
 
     @app.post("/jobs", status_code=201)
     def submit(spec: JobSpec, team: Team) -> Job:
-        job_id = secrets.token_hex(4)
-        name = k8s_name(job_id)
-        rayjob = build_rayjob(
-            job_id, team, spec, image=settings.image, ray_version=settings.ray_version
+        """201 with state SUBMITTED, or QUEUED when the team's quota is busy right now.
+        422 when the job is bigger than the team's whole quota."""
+        try:
+            job = admitter.submit(team, spec)
+        except QuotaExceeded as e:
+            raise HTTPException(422, str(e)) from None
+        log.info(
+            "job submitted",
+            extra={"job_id": job.id, "team": team, "workers": spec.workers, "state": job.state},
         )
-        created = kube.create_rayjob(team, rayjob)
-        if spec.files:
-            cm = build_code_configmap(job_id, team, spec, owner_uid=created["metadata"]["uid"])
-            try:
-                kube.create_configmap(team, cm)
-            except KubeError:
-                kube.delete_rayjob(team, name)
-                raise
-        job = registry.insert(job_id, team, name, spec)
-        log.info("job submitted", extra={"job_id": job_id, "team": team, "workers": spec.workers})
         return job
 
     @app.get("/jobs")
@@ -117,10 +116,11 @@ def create_app(
     def cancel(job: OwnedJob) -> Job:
         if job.state in TERMINAL:
             raise HTTPException(409, f"job {job.id} already {job.state}")
-        logs = kube.job_logs(job.team, job.k8s_name)
-        if logs:
-            registry.set_logs(job.id, logs)
-        kube.delete_rayjob(job.team, job.k8s_name)
+        if job.state != JobState.QUEUED:  # a queued job has nothing in Kubernetes yet
+            logs = kube.job_logs(job.team, job.k8s_name)
+            if logs:
+                registry.set_logs(job.id, logs)
+            kube.delete_rayjob(job.team, job.k8s_name)
         registry.transition(job.id, JobState.CANCELLED, "cancelled by user")
         log.info("job cancelled", extra={"job_id": job.id, "team": job.team})
         updated = registry.get(job.id)

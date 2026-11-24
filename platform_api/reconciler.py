@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from platform_api.admission import Admitter
 from platform_api.k8s import KubeClient
 from platform_api.models import TERMINAL, Job, JobState
 from platform_api.registry import Registry
@@ -81,8 +82,11 @@ def finalize(registry: Registry, kube: KubeClient, job: Job, obs: Observation) -
         log.info("job finished", extra={"job_id": job.id, "team": job.team, "state": obs.state})
 
 
-def reconcile_once(registry: Registry, kube: KubeClient) -> None:
+def reconcile_once(registry: Registry, kube: KubeClient, admitter: Admitter | None = None) -> None:
+    """Sync admitted jobs from their RayJobs, then admit queued jobs into the freed quota."""
     for job in registry.active():
+        if job.state == JobState.QUEUED:
+            continue  # no RayJob yet; the admitter owns it
         try:
             rayjob = kube.get_rayjob(job.team, job.k8s_name)
             if rayjob is None:
@@ -98,9 +102,16 @@ def reconcile_once(registry: Registry, kube: KubeClient) -> None:
                 )
         except Exception:
             log.exception("reconcile failed", extra={"job_id": job.id})
+    if admitter is not None:
+        try:
+            admitter.admit_queued()
+        except Exception:
+            log.exception("admission failed")
 
 
-async def run_forever(registry: Registry, kube: KubeClient, interval: float) -> None:
+async def run_forever(
+    registry: Registry, kube: KubeClient, admitter: Admitter, interval: float
+) -> None:
     while True:
-        await asyncio.to_thread(reconcile_once, registry, kube)
+        await asyncio.to_thread(reconcile_once, registry, kube, admitter)
         await asyncio.sleep(interval)

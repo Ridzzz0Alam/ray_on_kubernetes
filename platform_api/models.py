@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -16,6 +17,7 @@ _SHELL_META = re.compile(r"[;&|<>`$\n\\]")
 
 
 class JobState(StrEnum):
+    QUEUED = "QUEUED"  # waiting in the API for team quota; no Kubernetes objects yet
     SUBMITTED = "SUBMITTED"
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -26,6 +28,23 @@ class JobState(StrEnum):
 
 
 TERMINAL = frozenset({JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED})
+
+
+@dataclass(frozen=True)
+class Resources:
+    """Pod resource *requests*: what a ResourceQuota's requests.cpu / requests.memory count."""
+
+    cpu_m: int = 0
+    mem_mib: int = 0
+
+    def __add__(self, other: Resources) -> Resources:
+        return Resources(self.cpu_m + other.cpu_m, self.mem_mib + other.mem_mib)
+
+    def fits_in(self, other: Resources) -> bool:
+        return self.cpu_m <= other.cpu_m and self.mem_mib <= other.mem_mib
+
+    def __str__(self) -> str:
+        return f"{self.cpu_m / 1000:g} CPU / {self.mem_mib}Mi"
 
 
 def memory_mib(quantity: str) -> int:

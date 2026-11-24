@@ -6,10 +6,13 @@ from typing import Any, Protocol
 
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
+from kubernetes.utils import parse_quantity
 
 from platform_api.manifests import SUBMITTER_CONTAINER
+from platform_api.models import Resources
 
 GROUP, VERSION, PLURAL = "ray.io", "v1", "rayjobs"
+UNBOUNDED = 10**9  # a quota that doesn't set requests.cpu / requests.memory
 
 
 class KubeError(Exception):
@@ -30,6 +33,26 @@ class KubeClient(Protocol):
 
     def job_logs(self, namespace: str, name: str, tail_lines: int | None = None) -> str | None:
         """Logs of the newest submitter pod, which tails the Ray driver. None if no pod yet."""
+
+    def get_quota(self, namespace: str) -> Resources | None:
+        """The namespace's hard requests.cpu / requests.memory (tightest across its
+        ResourceQuotas), or None when it has no quota."""
+
+
+def quota_from_hard(hards: list[dict[str, str]]) -> Resources | None:
+    if not hards:
+        return None
+    cpu = min(
+        (parse_quantity(h["requests.cpu"]) for h in hards if "requests.cpu" in h), default=None
+    )
+    mem = min(
+        (parse_quantity(h["requests.memory"]) for h in hards if "requests.memory" in h),
+        default=None,
+    )
+    return Resources(
+        UNBOUNDED if cpu is None else int(cpu * 1000),
+        UNBOUNDED if mem is None else int(mem / 2**20),
+    )
 
 
 class RealKube:
@@ -92,3 +115,10 @@ class RealKube:
             if e.status in (400, 404):  # container still creating, or pod just went away
                 return None
             raise self._wrap(e) from e
+
+    def get_quota(self, namespace: str) -> Resources | None:
+        try:
+            quotas = self._core.list_namespaced_resource_quota(namespace)
+        except ApiException as e:
+            raise self._wrap(e) from e
+        return quota_from_hard([q.spec.hard or {} for q in quotas.items if q.spec])

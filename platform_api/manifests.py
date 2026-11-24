@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from platform_api.models import JobSpec, memory_mib
+from platform_api.models import JobSpec, Resources, memory_mib
 
 CODE_DIR = "/home/ray/rkp-code"
 # On the kind node, /shared is the repo's ./.shared (infra/kind/cluster.yaml).
@@ -13,6 +13,8 @@ SHARED_DATA = "/shared/data"  # datasets + model weights from `make data`, read-
 CHECKPOINTS = "/shared/checkpoints"  # each job sees only its own team's subdir here
 SUBMITTER_CONTAINER = "ray-job-submitter"
 HEAD_MEMORY_MIB = 3072
+HEAD_CPU_REQUEST_M = 250
+SUBMITTER_REQUEST = Resources(cpu_m=50, mem_mib=200)
 TTL_SECONDS = 60  # safety net; the reconciler deletes finished RayJobs itself
 
 
@@ -34,7 +36,7 @@ def _container(
     name: str,
     image: str,
     cpu: str,
-    cpu_req: str,
+    request: Resources,
     mem_mib: int,
     mounts: list[dict[str, Any]] | None = None,
     env: list[dict[str, str]] | None = None,
@@ -44,7 +46,7 @@ def _container(
         "image": image,
         "imagePullPolicy": "Never",  # images are kind-loaded, never pulled at pod start
         "resources": {
-            "requests": {"cpu": cpu_req, "memory": f"{mem_mib // 2}Mi"},
+            "requests": {"cpu": f"{request.cpu_m}m", "memory": f"{request.mem_mib}Mi"},
             "limits": {"cpu": cpu, "memory": f"{mem_mib}Mi"},
         },
     }
@@ -53,6 +55,23 @@ def _container(
     if env:
         c["env"] = env
     return c
+
+
+# Requests are half the limits (as measured in Phase 1) so the laptop isn't over-reserved.
+def _head_request() -> Resources:
+    return Resources(HEAD_CPU_REQUEST_M, HEAD_MEMORY_MIB // 2)
+
+
+def _worker_request(spec: JobSpec) -> Resources:
+    return Resources(spec.cpu * 500, memory_mib(spec.memory) // 2)
+
+
+def job_requests(spec: JobSpec) -> Resources:
+    """Everything the job's pods request together: what it counts against the team quota."""
+    total = _head_request() + SUBMITTER_REQUEST
+    for _ in range(spec.workers):
+        total += _worker_request(spec)
+    return total
 
 
 def _ray_pod_storage(
@@ -101,22 +120,20 @@ def build_rayjob(
     if spec.resources:
         worker_params["resources"] = ray_resources_param(spec.resources)
 
-    # Requests are half the limits (as measured in Phase 1) so the laptop isn't over-reserved.
     # The head carries dashboard, GCS, autoscaler, the driver and (Ray Train V2) the 0-CPU
     # TrainController. Ray's memory monitor killed jobs at 1.5Gi (Phase 2: hello) and at 2Gi
     # (Phase 3: a torch-importing driver + controller reached 1.91GB), so it gets 3Gi.
-    head = _container("ray-head", image, "1", "250m", HEAD_MEMORY_MIB, mounts, env)
+    head = _container("ray-head", image, "1", _head_request(), HEAD_MEMORY_MIB, mounts, env)
     worker = _container(
         "ray-worker",
         image,
         str(spec.cpu),
-        f"{spec.cpu * 500}m",
+        _worker_request(spec),
         memory_mib(spec.memory),
         mounts,
         env,
     )
-    submitter = _container(SUBMITTER_CONTAINER, image, "500m", "50m", 512)
-    submitter["resources"]["requests"]["memory"] = "200Mi"
+    submitter = _container(SUBMITTER_CONTAINER, image, "500m", SUBMITTER_REQUEST, 512)
 
     return {
         "apiVersion": "ray.io/v1",

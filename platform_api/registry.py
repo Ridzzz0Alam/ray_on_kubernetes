@@ -68,17 +68,26 @@ class Registry:
             finished_at=row["finished_at"] and datetime.fromisoformat(row["finished_at"]),
         )
 
-    def insert(self, job_id: str, team: str, k8s_name: str, spec: JobSpec) -> Job:
+    def insert(
+        self,
+        job_id: str,
+        team: str,
+        k8s_name: str,
+        spec: JobSpec,
+        state: JobState = JobState.SUBMITTED,
+        message: str | None = None,
+    ) -> Job:
         with self._conn() as c:
             c.execute(
-                "INSERT INTO jobs (id, team, k8s_name, spec, state, submitted_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO jobs (id, team, k8s_name, spec, state, message, submitted_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id,
                     team,
                     k8s_name,
                     spec.model_dump_json(),
-                    JobState.SUBMITTED,
+                    state,
+                    message,
                     utcnow().isoformat(),
                 ),
             )
@@ -99,10 +108,21 @@ class Registry:
             ).fetchall()
         return [self._to_job(r) for r in rows]
 
-    def active(self) -> list[Job]:
+    def active(self, team: str | None = None) -> list[Job]:
+        """Non-terminal jobs (QUEUED included), oldest first."""
+        sql = f"SELECT * FROM jobs WHERE state NOT IN ({_TERMINAL_SQL})"
+        args: tuple[str, ...] = ()
+        if team is not None:
+            sql, args = sql + " AND team = ?", (team,)
         with self._conn() as c:
-            rows = c.execute(f"SELECT * FROM jobs WHERE state NOT IN ({_TERMINAL_SQL})").fetchall()
+            rows = c.execute(sql + " ORDER BY submitted_at, rowid", args).fetchall()
         return [self._to_job(r) for r in rows]
+
+    def spec(self, job_id: str) -> JobSpec:
+        """The full submitted spec, files included (Job.spec leaves them out)."""
+        with self._conn() as c:
+            row = c.execute("SELECT spec FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return JobSpec.model_validate_json(row["spec"])
 
     def transition(
         self,
@@ -133,6 +153,10 @@ class Registry:
                 (state, message, started, finished, job_id, state),
             )
         return cur.rowcount == 1
+
+    def set_message(self, job_id: str, message: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE jobs SET message = ? WHERE id = ?", (message, job_id))
 
     def set_logs(self, job_id: str, logs: str) -> None:
         with self._conn() as c:
