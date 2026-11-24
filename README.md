@@ -102,7 +102,7 @@ Most of the 42s in PENDING is pod start-up for the head and workers on 2 cores.
 
 ![Job lifecycle](docs/diagrams/job-lifecycle.svg)
 
-## 5. Distributed training and fault tolerance (training ✅, fault tolerance 🚧)
+## 5. Distributed training and fault tolerance ✅
 
 The training workload is a sentiment classifier on an Amazon reviews subset (about 4k train / 1k eval).
 `TorchTrainer` runs 2 workers on the CPU `gloo` backend, with `torch.set_num_threads(1)` per worker so they
@@ -146,11 +146,17 @@ model, **optimizer** and **epoch counter**, not just the weights. So a crash cos
   went 34s → 137s → 244s, team-b's stayed at 34s and its job succeeded ([recorded run](docs/demos/multi-tenancy.md)).
 - **Next step:** [Kueue](https://kueue.sigs.k8s.io/) for proper admission queues, fair sharing and preemption.
 
-## 7. Inference with autoscaling 🚧
+## 7. Inference with autoscaling ✅
 
-The trained model is served as a `RayService` (Ray Serve, `POST /predict`) with
-`autoscaling_config: {min_replicas: 1, max_replicas: 3, target_ongoing_requests: 2}`.
+`POST /services {"name": "sentiment", "job_id": "<training job>"}` serves the latest checkpoint of a SUCCEEDED
+training job as a `RayService` (Ray Serve, `POST /predict`) with
+`autoscaling_config: {min_replicas: 1, max_replicas: 3, target_ongoing_requests: 2}`. Replicas scale inside one
+fixed 2-CPU worker pod, and the service counts against the team quota.
 `scripts/load_test.py` ramps from 1 to 20 concurrent clients and records the replica count and p50/p95 latency.
+
+Measured: replicas went **1 → 3** under load and back to 1 38s after it stopped. p50 was 12 ms with 1 client and 210 ms with 20.
+Throughput was capped at about 90 req/s by the single Serve HTTP proxy (100% of one core), not by the replicas
+([recorded run and analysis](docs/demos/serving.md)).
 
 ## 8. Observability and cost 🚧
 
@@ -208,7 +214,7 @@ make data        # training data + model → .shared/data (once; PROFILE=distilb
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
-make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC (~11 min)
+make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC, serving (~14 min)
 make down        # tear everything down
 ```
 
@@ -225,7 +231,7 @@ kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).
 | Integration | Submit / status / logs / cancel against kind | `make test-k8s` | ✅ |
 | Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh`, run by `make test-k8s` | ✅ |
 | Tenancy | Noisy neighbour: team-b unaffected by team-a saturation, RBAC `can-i` checks | `scripts/noisy_neighbour.sh`, `make test-k8s` | ✅ |
-| Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` | 🚧 |
+| Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` (+ serve e2e in `make test-k8s`) | ✅ |
 
 CI (GitHub Actions) runs the static and unit layers on every push. The cluster tests run locally, because a kind
 cluster with Ray needs more than CI runners comfortably provide.
@@ -238,9 +244,9 @@ These will be filled in from real runs. No numbers until they're measured.
 |---|---|
 | Training time, `tiny`, 2 workers, 2 epochs | 97s of training (~35s/epoch); 2m27s from submit to SUCCEEDED |
 | Eval accuracy | 85.3% on 1k held-out reviews (85.1% after epoch 1) |
-| Work lost when a worker is killed mid-epoch | TBD (target: ≤ 1 epoch) |
-| Team-b queue time while team-a is saturated | TBD |
-| Serve replicas under load / p50 latency | TBD |
+| Work lost when a worker is killed mid-epoch | The partial epoch only: resumed from the epoch-1 checkpoint and finished at 85.6% |
+| Team-b queue time while team-a is saturated | 34s, the same as an unloaded cluster (team-a: 34s → 137s → 244s) |
+| Serve replicas under load / p50 latency | 1 → 3 → 1 replicas; p50 12 ms (1 client) to 210 ms (20 clients), about 90 req/s through one Serve proxy |
 | Peak stack RAM | 6.9 GiB for `tiny` training (head 2.76 + 2 × 1.33 GiB workers + kind + operator, counted as Ray does, without page cache), against a 7 GB budget. Monitoring isn't included yet |
 
 ## 13. What production would change
@@ -254,7 +260,7 @@ See [ARCHITECTURE.md §9](ARCHITECTURE.md#9-production-gaps-deliberately-not-bui
 ```
 platform_api/   FastAPI service            ✅    infra/versions.env  pinned versions   ✅
 sdk/            Python SDK + rkp CLI       ✅    infra/kind, k8s, helm  cluster, operator  ✅
-workloads/      Ray Train + Ray Serve      🚧    scripts/            tools, diagrams   ✅
+workloads/      Ray Train + Ray Serve      ✅    scripts/            tools, diagrams   ✅
 docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest            ✅
 ```
 
@@ -262,8 +268,8 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 
 | Phase | | Phase | |
 |---|---|---|---|
-| 0 Bootstrap | ✅ | 5 Ray Serve | 🚧 |
-| 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | 🚧 |
+| 0 Bootstrap | ✅ | 5 Ray Serve | ✅ |
+| 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | ✅ |
 | 2 API + SDK | ✅ | 7 Observability + cost | 🚧 |
 | 3 Distributed training | ✅ | 8 GPU awareness | 🚧 |
-| 4 Lifecycle | 🚧 | 9 Polish + full case study | 🚧 |
+| 4 Lifecycle | ✅ | 9 Polish + full case study | 🚧 |

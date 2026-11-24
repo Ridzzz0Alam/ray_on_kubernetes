@@ -6,6 +6,40 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-24: Phase 5 complete (Ray Serve)
+
+**Done**
+- `workloads/serve/app.py`: Serve deployment `Sentiment` (built with `app:build`) that loads the latest `checkpoint_<ts>/state.pt` of a run.
+  `POST /predict` takes `{"text"}` or `{"texts": [≤32]}`, `GET /` returns checkpoint info, and bad input → 422.
+- API: `POST/GET/DELETE /services` (+ `GET /services/{name}`). The job must be the team's own and SUCCEEDED. Services are stored in a new
+  `services` registry table, and their state is read live from the RayService (`observe_service`). Services count in `Admitter.in_use`:
+  busy quota → 409, never fits → 422.
+- `manifests.py`: a shared `_ray_cluster()` builds both RayJob and RayService. `build_rayservice` has a read-only checkpoint mount and a
+  RayService-owned code ConfigMap.
+- `scripts/load_test.py`: closed-loop async httpx stages, replica count from the dashboard's `/api/serve/applications/`. Exits 0 only if it scaled up *and* down.
+- `docs/demos/serving.md`, plus the serve e2e test (train 1 epoch → serve → predict → delete → no pods).
+- Tests: 71 unit tests; `make test-k8s`: 16 tests, all passing, 13m34s.
+
+**Measured:** replicas went 1 → 3 under load (2 at +42s with 10 clients, 3 at +55s) and back to 1 38s after the load stopped. 0 errors in 8,948 requests.
+p50 was 12 ms at 1 client and 210 ms at 20. **Throughput was flat at about 90 req/s:** `ray::ProxyActor` (the head's Serve HTTP proxy) sat at 100% of a core,
+the head container at 98% of its 1-CPU limit, and the replicas at 27–36% each. The node peaked at 5.06 GiB while serving.
+Service creation → RUNNING took about 35s.
+
+**State:** the cluster is deleted, and the API and port-forwards are stopped. `.shared/checkpoints/team-a/e31235ff/` (2-epoch run) stays, so serving can reuse it.
+
+**Next: Phase 7** (observability + cost): minimal Prometheus + Grafana, API `/metrics`, the dashboard, and `rkp cost`.
+The registry already has everything cost needs: job timestamps and spec requests, plus `services.created_at/deleted_at`.
+
+**Gotchas**
+- KubeRay creates `<name>-serve-svc` only once the app is ready. Use the stable `<name>-head-svc` for the dashboard (8265), not the
+  `<cluster>-head-svc` with the random suffix.
+- The API's dev port is 8000, so port-forward Serve to **8001**.
+- There's no CLI for services yet (only the HTTP API). The SDK/CLI could get `rkp serve` in Phase 9 polish.
+- The serve app needs a Phase 4+ checkpoint. Phase 3 runs have none, and you get UNHEALTHY with "no checkpoint_*/".
+- `pkill -f <pattern>` from an agent shell matches its own bash and exits 144. Check with `pgrep` and `kill` the PIDs.
+
+---
+
 ## 2026-11-24: Phase 6 complete (multi-tenancy)
 
 **Done**

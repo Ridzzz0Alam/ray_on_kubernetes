@@ -111,14 +111,14 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 - [x] Recorded in `docs/demos/multi-tenancy.md` with commands and output
 - [ ] (Stretch, skipped) Kueue `ClusterQueue`/`LocalQueue` per team
 
-## Phase 5: Inference with Ray Serve (Sun afternoon)
+## Phase 5: Inference with Ray Serve (Sun afternoon) ✅
 
-- [ ] `workloads/serve/app.py`: loads the latest checkpoint and serves `POST /predict`
-- [ ] Deployed as a `RayService` via `POST /services`, autoscaling min 1 / max 3 on `target_ongoing_requests`
-- [ ] `scripts/load_test.py` (async httpx) ramps from 1 to 20 concurrent clients
+- [x] `workloads/serve/app.py`: loads the latest checkpoint and serves `POST /predict`
+- [x] Deployed as a `RayService` via `POST /services`, autoscaling min 1 / max 3 on `target_ongoing_requests`
+- [x] `scripts/load_test.py` (async httpx) ramps from 1 to 20 concurrent clients
 
 **Acceptance**
-- [ ] Replicas scale from 1 to at least 2 under load, and back down afterwards. p50 latency is reported
+- [x] Replicas scale from 1 to at least 2 under load, and back down afterwards. p50 latency is reported
 
 ## Phase 7: Observability + cost (Sun afternoon)
 
@@ -192,3 +192,7 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-24 | Team quota is 2 CPU / 4Gi of requests (ARCHITECTURE said 3Gi) | A default 2-worker training job requests 3272Mi. 4Gi fits it, but not two 1-worker jobs (2 × 2504Mi), which is what the demo needs. 2 teams × 4Gi stays under the node's 15 GB |
 | 2026-11-24 | The admitter counts in-use quota from the registry (admitted, unfinished jobs), not the ResourceQuota's `status.used` | `status.used` lags: a just-created RayJob has no pods yet, so its requests show up seconds later and a second job would be over-admitted |
 | 2026-11-24 | RBAC: one ClusterRole bound with RoleBindings only in team namespaces. The dev API keeps using the host kubeconfig | It gives the API no rights outside team namespaces. Running the API in-cluster as the SA is deployment work that's not in the plan; `make test-k8s` checks the rights with `kubectl auth can-i --as` |
+| 2026-11-24 | Serve replicas autoscale inside a fixed worker group (1 × 2 CPU, 0.5 CPU per replica). No KubeRay in-tree pod autoscaler | Pod autoscaling adds an autoscaler sidecar and 30s+ pod starts, which the 7 GB laptop budget can't spare. Replica autoscaling is what the acceptance measures |
+| 2026-11-24 | Serve autoscaling delays are 5s up and 30s down (Ray defaults: 30s / 600s) | So the demo scales up and back down within a minute or two |
+| 2026-11-24 | Services count against the team quota but aren't queued: the API returns 409 when the quota is busy, and 422 when a service could never fit | A long-running service waiting in a queue behind jobs isn't useful. Counting it keeps the Phase 6 ceilings honest |
+| 2026-11-24 | Serve code ships in a RayService-owned ConfigMap (`app.py` + `profiles.py`), not baked into the image | Same mechanism as job code: no image rebuild, and it's garbage-collected with the service |

@@ -34,7 +34,7 @@ Everything runs on a **2-core / 15 GB laptop**.
   `config/api_keys.yaml` (`make keys`). Every handler gets its namespace from the key, never from the request
   body. Another team's job returns 403.
 - **Endpoints:** `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/logs`,
-  `DELETE /jobs/{id}` (cancel), `POST /services`, `DELETE /services/{name}`, `GET /metrics`, `GET /healthz`.
+  `DELETE /jobs/{id}` (cancel), `POST /services`, `GET /services[/{name}]`, `DELETE /services/{name}`, `GET /metrics`, `GET /healthz`.
 - **`k8s.py`:** the only module that talks to Kubernetes (`CustomObjectsApi` for `ray.io/v1`
   RayJob/RayService, `CoreV1Api` for pod logs and quotas). It sits behind a protocol so tests can use a fake.
 - **Registry (SQLite):** one source of truth for job history. CRs are short-lived, but the registry keeps the record.
@@ -70,8 +70,15 @@ operators (`&& ; |` …) are rejected.
   `/shared/checkpoints` on head and workers. `RunConfig(storage_path=$RKP_STORAGE, name=$RKP_JOB_ID)`.
 
 ### 3.5 Serving workload (`workloads/serve/`)
-A Ray Serve deployment that loads the latest checkpoint for a given team/job. It's deployed as a `RayService`
-with `autoscaling_config` (min 1, max 3, `target_ongoing_requests` ≈ 2).
+A Ray Serve deployment that loads the latest `checkpoint_<ts>/state.pt` of a team's training job and serves
+`POST /predict`. `POST /services {name, job_id}` (the job must be the team's own and SUCCEEDED) creates a `RayService`
+whose `serveConfigV2` calls `app:build` with `args: {run_dir, profile}`, plus `autoscaling_config` (min 1, max 3,
+`target_ongoing_requests: 2`, `upscale_delay_s: 5`, `downscale_delay_s: 30`). The code ships in a ConfigMap owned by
+the RayService, the same way job code does. Replicas take 0.5 Ray CPU and scale inside a fixed worker group
+(1 × 2 CPU / 2Gi). There's no KubeRay pod autoscaling on the laptop. A service counts against the team quota: it's
+admitted only if it fits now (409 if not, no queue, because it's long-running), and `GET /services/{name}` reads its state
+live from the RayService. Measured: 1 → 3 → 1 replicas, with throughput capped at about 90 req/s by the single Serve
+HTTP proxy on the head (`docs/demos/serving.md`).
 
 ## 4. Job lifecycle
 
