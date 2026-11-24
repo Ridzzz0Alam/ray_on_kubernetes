@@ -6,6 +6,34 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-24: Phase 6 complete (multi-tenancy)
+
+**Done**
+- `infra/k8s/teams/quotas.yaml`: a `ResourceQuota` per team (2 CPU / 4Gi of requests, 3 RayJobs) plus a `LimitRange`. `rbac.yaml`
+  adds the `rkp-system/rkp-api` SA with a ClusterRole bound only in team namespaces. `make teams` applies all of it.
+- `platform_api/admission.py`: whole-job admission. A job is admitted only if all its pod requests fit (`manifests.job_requests`).
+  Otherwise it's **QUEUED** (new state, no K8s objects) with a "waiting for quota" message, and the reconciler admits FIFO per team.
+  A job bigger than the whole quota → **422**. Cancelling a QUEUED job touches nothing in K8s.
+- `scripts/noisy_neighbour.sh` (+ `scripts/job_table.py`), `workloads/sleep.py`, `docs/demos/multi-tenancy.md`.
+- Tests: 55 unit tests and 15 k8s tests (9 RBAC `can-i` cases, plus a noisy-neighbour test), all passing. `make test-k8s` takes 10m58s.
+
+**Measured (demo, 3 team-a jobs + 1 team-b):** team-a's queue time was 34s → 137s → 244s. Team-b's stayed at 34s and it SUCCEEDED while 2 team-a
+jobs were still queued. Node peak with 2 clusters at once: **5.20 GiB** (excluding page cache).
+
+**State:** the cluster is deleted, the API is stopped, and the dev registry `.rkp/` is deleted.
+
+**Next: Phase 5** (Ray Serve: `workloads/serve/app.py` loads the latest checkpoint, `POST /services` → RayService, autoscaling 1→3,
+`scripts/load_test.py`). Serving needs a trained checkpoint, so run a training job first. Its 2 workers fit the team quota.
+
+**Gotchas**
+- The admitter counts in-use quota from the registry, not `ResourceQuota.status.used` (that lags until pods exist).
+  Anything that creates pods in a team namespace outside the API isn't counted, but K8s still enforces the quota per pod.
+- `started_at` is the Ray driver start, so "queue time" includes about 34s of cluster start-up even with no queueing.
+- The dev API still uses the host kubeconfig. The SA's rights are only checked by `kubectl auth can-i --as` in `make test-k8s`.
+- Phase 5's `RayService` will need admission too (a serving cluster takes quota). It isn't covered yet: `POST /services` should go through `Admitter`.
+
+---
+
 ## 2026-11-24: Phase 4 complete (checkpoint, resume, retry, cancel)
 
 **Done**

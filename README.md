@@ -133,16 +133,17 @@ Fault tolerance has two layers:
 The key detail is that the training loop always starts with `ray.train.get_checkpoint()` and restores the
 model, **optimizer** and **epoch counter**, not just the weights. So a crash costs at most one epoch.
 
-## 6. Multi-tenancy 🚧
+## 6. Multi-tenancy ✅
 
 ![Multi-tenancy](docs/diagrams/multi-tenancy.svg)
 
 - **Isolation:** every API call is scoped to the namespace of the caller's key, so team-b gets a 403 on team-a's jobs.
   When the API runs in-cluster, RBAC limits its ServiceAccount to `ray.io` resources in `team-*` namespaces.
-- **No starvation:** each team has a hard `ResourceQuota`, and the node is sized so that the sum of the quotas is no more than
-  allocatable. Team-a filling its quota leaves its extra jobs pending, and team-b is unaffected.
-- **Demo:** `scripts/noisy_neighbour.sh` floods team-a, then submits one team-b job. It checks that team-b's job
-  succeeds and its queue time stays flat.
+- **No starvation:** each team has a hard `ResourceQuota` (2 CPU / 4Gi of requests), and the node is sized so that the sum of
+  the quotas is no more than allocatable. The API admits whole jobs against the quota: extra jobs wait `QUEUED` (FIFO),
+  and a job bigger than the whole quota gets a 422 with the numbers. Team-b is unaffected.
+- **Demo:** `scripts/noisy_neighbour.sh` floods team-a, then submits one team-b job. Measured: team-a's queue time
+  went 34s → 137s → 244s, team-b's stayed at 34s and its job succeeded ([recorded run](docs/demos/multi-tenancy.md)).
 - **Next step:** [Kueue](https://kueue.sigs.k8s.io/) for proper admission queues, fair sharing and preemption.
 
 ## 7. Inference with autoscaling 🚧
@@ -202,12 +203,12 @@ make down        # delete the cluster
 API + CLI (Phase 2):
 
 ```bash
-make teams       # team-a / team-b namespaces (quotas come in Phase 6)
+make teams       # team-a / team-b namespaces, quotas, LimitRanges, API RBAC
 make data        # training data + model → .shared/data (once; PROFILE=distilbert for the big one)
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
-make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries (~10 min)
+make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC (~11 min)
 make down        # tear everything down
 ```
 
@@ -223,7 +224,7 @@ kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).
 | Unit | JobSpec → RayJob manifest, auth and team scoping, reconciler, CLI (fake K8s client) | `make test` | ✅ |
 | Integration | Submit / status / logs / cancel against kind | `make test-k8s` | ✅ |
 | Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh`, run by `make test-k8s` | ✅ |
-| Tenancy | Noisy neighbour: team-b unaffected by team-a saturation | `scripts/noisy_neighbour.sh` | 🚧 |
+| Tenancy | Noisy neighbour: team-b unaffected by team-a saturation, RBAC `can-i` checks | `scripts/noisy_neighbour.sh`, `make test-k8s` | ✅ |
 | Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` | 🚧 |
 
 CI (GitHub Actions) runs the static and unit layers on every push. The cluster tests run locally, because a kind

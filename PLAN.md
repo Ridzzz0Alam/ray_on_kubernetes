@@ -97,19 +97,19 @@ counts it (cgroup minus page cache): head 2.76 GiB, workers 1.33 GiB each, node 
 - [x] Cancelling during training leaves no Ray pods behind
 - [x] This is covered by `make test-k8s`
 
-## Phase 6: Multi-tenancy (Sun morning)
+## Phase 6: Multi-tenancy (Sun morning) ✅
 
 Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 
-- [ ] `make teams`: namespaces `team-a` and `team-b`, each with a `ResourceQuota` (e.g. 2 CPU / 3Gi) and a `LimitRange`
-- [ ] RBAC: the API's ServiceAccount can only manage `ray.io` resources in `team-*` namespaces
-- [ ] The API rejects or queues requests that go over quota, with a clear error
-- [ ] `scripts/noisy_neighbour.sh`: team-a goes over its quota, while team-b submits one job
+- [x] `make teams`: namespaces `team-a` and `team-b`, each with a `ResourceQuota` (2 CPU / 4Gi of requests) and a `LimitRange`
+- [x] RBAC: the API's ServiceAccount can only manage `ray.io` resources in `team-*` namespaces
+- [x] The API rejects or queues requests that go over quota, with a clear error
+- [x] `scripts/noisy_neighbour.sh`: team-a goes over its quota, while team-b submits one job
 
 **Acceptance**
-- [ ] Team-a's extra jobs wait or are rejected, while team-b's job is scheduled and SUCCEEDS
-- [ ] Recorded in `docs/demos/multi-tenancy.md` with commands and output
-- [ ] (Stretch) Kueue `ClusterQueue`/`LocalQueue` per team
+- [x] Team-a's extra jobs wait or are rejected, while team-b's job is scheduled and SUCCEEDS
+- [x] Recorded in `docs/demos/multi-tenancy.md` with commands and output
+- [ ] (Stretch, skipped) Kueue `ClusterQueue`/`LocalQueue` per team
 
 ## Phase 5: Inference with Ray Serve (Sun afternoon)
 
@@ -188,3 +188,7 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-24 | Only rank 0 saves the checkpoint (`{model, optim, sched, epoch}` in one `state.pt`). Every rank still calls `ray.train.report` | DDP weights are identical on every rank. One copy halves the disk writes on the shared hostPath |
 | 2026-11-24 | The retry count comes from KubeRay's `status.failed`: FAILED says `failed after N attempts: ...`, RETRYING says `attempt k of N failed` | The RayJob gets deleted once it finishes, so the registry message is the only place the attempt count survives |
 | 2026-11-24 | `chaos_kill_worker.sh` triggers on the first `checkpoint_<ts>/` dir showing up in the host's `.shared` | It doesn't parse logs or depend on timing, and it reliably lands during epoch 2. The glob needs the trailing `/`, because Ray also writes `checkpoint_manager_snapshot.json` |
+| 2026-11-24 | Whole-job admission + FIFO queue per team in the API (new state `QUEUED`), not K8s pod-level quota rejection | K8s checks quota per pod, and a RayJob is a gang: two half-admitted jobs (heads in, workers rejected) can deadlock a team's quota. A queued job has no K8s objects, its message says why it waits, and FIFO means big jobs aren't starved. Too big for the whole quota → 422 |
+| 2026-11-24 | Team quota is 2 CPU / 4Gi of requests (ARCHITECTURE said 3Gi) | A default 2-worker training job requests 3272Mi. 4Gi fits it, but not two 1-worker jobs (2 × 2504Mi), which is what the demo needs. 2 teams × 4Gi stays under the node's 15 GB |
+| 2026-11-24 | The admitter counts in-use quota from the registry (admitted, unfinished jobs), not the ResourceQuota's `status.used` | `status.used` lags: a just-created RayJob has no pods yet, so its requests show up seconds later and a second job would be over-admitted |
+| 2026-11-24 | RBAC: one ClusterRole bound with RoleBindings only in team namespaces. The dev API keeps using the host kubeconfig | It gives the API no rights outside team namespaces. Running the API in-cluster as the SA is deployment work that's not in the plan; `make test-k8s` checks the rights with `kubectl auth can-i --as` |

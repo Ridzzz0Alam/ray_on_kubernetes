@@ -76,9 +76,9 @@ with `autoscaling_config` (min 1, max 3, `target_ongoing_requests` ≈ 2).
 ## 4. Job lifecycle
 
 ```
-SUBMITTED ──► PENDING (pods waiting: quota / capacity) ──► RUNNING ──► SUCCEEDED
-                │                                           │  │
-                └──────────────── CANCELLED ◄───────────────┘  └─► RETRYING ─► FAILED
+QUEUED (in the API: team quota busy) ──► SUBMITTED ──► PENDING (pods starting) ──► RUNNING ──► SUCCEEDED
+   │                                           │                                    │  │
+   └─────────────────────────────────── CANCELLED ◄─────────────────────────────────┘  └─► RETRYING ─► FAILED
 ```
 
 | Concern | Mechanism |
@@ -95,13 +95,21 @@ node that's equivalent to shared storage. In production this would be S3/GCS (§
 ## 5. Multi-tenancy
 
 - One namespace per team, each with:
-  - a `ResourceQuota` (e.g. `requests.cpu: 2`, `requests.memory: 3Gi`, `count/rayjobs.ray.io: 3`)
+  - a `ResourceQuota` (`requests.cpu: 2`, `requests.memory: 4Gi`, `count/rayjobs.ray.io: 3`). That fits one default
+    2-worker training job (1.3 CPU / 3272Mi of requests) but not two 1-worker jobs (2 × 2504Mi)
   - a `LimitRange` that sets default requests, so pods without them still count against the quota
-- **Isolation guarantees:** the API scopes every call to the key's namespace. RBAC (when the API runs in-cluster)
-  limits the ServiceAccount to `ray.io` resources in `team-*` namespaces.
+- **Isolation guarantees:** the API scopes every call to the key's namespace. RBAC (`infra/k8s/teams/rbac.yaml`, used
+  when the API runs in-cluster) binds the `rkp-system/rkp-api` ServiceAccount only inside team namespaces, and only to
+  RayJobs/RayServices, code ConfigMaps, pod logs and reading quotas.
 - **No starvation:** a quota is a hard ceiling per team. Team-a filling its quota can't use
   team-b's share, because the node's capacity is sized so that the sum of the team quotas is no more than allocatable.
-- **Queueing:** quota-rejected pods leave the RayJob Pending, and that shows up as queue time.
+- **Queueing (whole-job admission):** Kubernetes checks quota per pod, but a RayJob is a gang (head + workers +
+  submitter). Left to K8s, two queued jobs could each get a head admitted, fill the quota, and leave neither able
+  to start its workers. So `platform_api/admission.py` admits a job only when *all* its pod requests fit next to
+  the team's other admitted jobs (counted from the registry). A job that doesn't fit now is `QUEUED` with
+  nothing created in K8s. The reconciler admits the queue FIFO per team, stopping at the first job that doesn't
+  fit, so big jobs aren't starved. A job bigger than the whole quota is rejected with a 422. The ResourceQuota
+  stays as the per-pod backstop. Queue time = submit → Ray driver start. Demo: `docs/demos/multi-tenancy.md`.
   The stretch goal is Kueue, which gives proper admission queues and fair sharing.
 
 ## 6. Resource budget
@@ -149,7 +157,7 @@ Turn monitoring off when you don't need it (`make monitoring-down`).
 | API keys in YAML | OIDC/SSO, a team mapping from groups |
 | SQLite registry | Postgres |
 | polling reconciler | K8s watch / informer, or a controller |
-| ResourceQuota + simple queue | Kueue with fair sharing and preemption |
+| ResourceQuota + FIFO admission queue in the API | Kueue with fair sharing and preemption |
 | single kind node | managed K8s, separate node pools (CPU/GPU, spot) |
 
 ## 10. Key technology choices
