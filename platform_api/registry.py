@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from platform_api.models import TERMINAL, Job, JobSpec, JobState
+from platform_api.models import TERMINAL, Job, JobSpec, JobState, ServiceSpec
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS jobs (
     logs         TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_team ON jobs (team, submitted_at);
+-- One row per deployment of a served model; deleted_at IS NULL while it exists.
+CREATE TABLE IF NOT EXISTS services (
+    team         TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    k8s_name     TEXT NOT NULL,
+    spec         TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    deleted_at   TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS services_live ON services (team, name) WHERE deleted_at IS NULL;
 """
 _TERMINAL_SQL = ",".join(f"'{s}'" for s in sorted(TERMINAL))
 
@@ -166,3 +176,36 @@ class Registry:
         with self._conn() as c:
             row = c.execute("SELECT logs FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return row["logs"] if row else None
+
+    # --- services -------------------------------------------------------------------------
+
+    def insert_service(self, team: str, k8s_name: str, spec: ServiceSpec) -> None:
+        """Raises sqlite3.IntegrityError if the team already has a live service of that name."""
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO services (team, name, k8s_name, spec, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (team, spec.name, k8s_name, spec.model_dump_json(), utcnow().isoformat()),
+            )
+
+    def live_services(self, team: str | None = None) -> list[sqlite3.Row]:
+        sql, args = "SELECT * FROM services WHERE deleted_at IS NULL", ()
+        if team is not None:
+            sql, args = sql + " AND team = ?", (team,)
+        with self._conn() as c:
+            return c.execute(sql + " ORDER BY created_at", args).fetchall()
+
+    def live_service(self, team: str, name: str) -> sqlite3.Row | None:
+        with self._conn() as c:
+            return c.execute(
+                "SELECT * FROM services WHERE team = ? AND name = ? AND deleted_at IS NULL",
+                (team, name),
+            ).fetchone()
+
+    def mark_service_deleted(self, team: str, name: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE services SET deleted_at = ?"
+                " WHERE team = ? AND name = ? AND deleted_at IS NULL",
+                (utcnow().isoformat(), team, name),
+            )

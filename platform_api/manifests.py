@@ -1,11 +1,12 @@
-"""Build the Kubernetes objects for a job: a RayJob plus a ConfigMap holding the user's code."""
+"""Build the Kubernetes objects: a RayJob (job) or RayService (served model), each with a
+ConfigMap holding its code."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from platform_api.models import JobSpec, Resources, memory_mib
+from platform_api.models import REPLICA_CPUS, JobSpec, Resources, ServiceSpec, memory_mib
 
 CODE_DIR = "/home/ray/rkp-code"
 # On the kind node, /shared is the repo's ./.shared (infra/kind/cluster.yaml).
@@ -18,12 +19,30 @@ SUBMITTER_REQUEST = Resources(cpu_m=50, mem_mib=200)
 TTL_SECONDS = 60  # safety net; the reconciler deletes finished RayJobs itself
 
 
+SERVE_APP = "sentiment"
+SERVE_DEPLOYMENT = "Sentiment"  # the class name in workloads/serve/app.py
+SERVE_PORT = 8000
+
+
 def k8s_name(job_id: str) -> str:
     return f"rkp-{job_id}"
 
 
+def service_k8s_name(name: str) -> str:
+    return f"rkp-svc-{name}"
+
+
+def service_endpoint(name: str, team: str) -> str:
+    """KubeRay fronts a RayService's Serve proxies with the Service `<name>-serve-svc`."""
+    return f"http://{service_k8s_name(name)}-serve-svc.{team}.svc:{SERVE_PORT}/predict"
+
+
 def _labels(job_id: str, team: str) -> dict[str, str]:
     return {"app.kubernetes.io/managed-by": "rkp", "rkp.io/job-id": job_id, "rkp.io/team": team}
+
+
+def _service_labels(name: str, team: str) -> dict[str, str]:
+    return {"app.kubernetes.io/managed-by": "rkp", "rkp.io/service": name, "rkp.io/team": team}
 
 
 def ray_resources_param(resources: dict[str, float]) -> str:
@@ -62,20 +81,28 @@ def _head_request() -> Resources:
     return Resources(HEAD_CPU_REQUEST_M, HEAD_MEMORY_MIB // 2)
 
 
-def _worker_request(spec: JobSpec) -> Resources:
-    return Resources(spec.cpu * 500, memory_mib(spec.memory) // 2)
+def _worker_request(cpu: int, memory: str) -> Resources:
+    return Resources(cpu * 500, memory_mib(memory) // 2)
 
 
 def job_requests(spec: JobSpec) -> Resources:
     """Everything the job's pods request together: what it counts against the team quota."""
     total = _head_request() + SUBMITTER_REQUEST
     for _ in range(spec.workers):
-        total += _worker_request(spec)
+        total += _worker_request(spec.cpu, spec.memory)
+    return total
+
+
+def service_requests(spec: ServiceSpec) -> Resources:
+    """A RayService has no submitter: just the head and its fixed workers."""
+    total = _head_request()
+    for _ in range(spec.workers):
+        total += _worker_request(spec.cpu, spec.memory)
     return total
 
 
 def _ray_pod_storage(
-    job_id: str, team: str, has_code: bool, code_cm: str
+    job_id: str, team: str, has_code: bool, code_cm: str, checkpoints_readonly: bool = False
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Volumes, mounts and env shared by the head and workers.
 
@@ -91,7 +118,7 @@ def _ray_pod_storage(
     ]
     mounts: list[dict] = [
         {"name": "shared-data", "mountPath": SHARED_DATA, "readOnly": True},
-        {"name": "checkpoints", "mountPath": CHECKPOINTS},
+        {"name": "checkpoints", "mountPath": CHECKPOINTS, "readOnly": checkpoints_readonly},
     ]
     env = [
         {"name": "RKP_JOB_ID", "value": job_id},
@@ -106,35 +133,73 @@ def _ray_pod_storage(
     return volumes, mounts, env
 
 
-def build_rayjob(
-    job_id: str, team: str, spec: JobSpec, *, image: str, ray_version: str
+def _ray_cluster(
+    labels: dict[str, str],
+    storage: tuple[list[dict], list[dict], list[dict]],
+    *,
+    workers: int,
+    cpu: int,
+    memory: str,
+    resources: dict[str, float],
+    image: str,
+    ray_version: str,
 ) -> dict[str, Any]:
-    name = k8s_name(job_id)
-    has_code = bool(spec.files)
-    volumes, mounts, env = _ray_pod_storage(job_id, team, has_code, name)
-    # KubeRay's submitter runs `ray job submit -- <entrypoint>` through a shell, so `cd x && ...`
-    # would split there. `env -C` changes directory without any shell operator.
-    entrypoint = f"env -C {CODE_DIR} {spec.entrypoint}" if has_code else spec.entrypoint
-
-    worker_params: dict[str, str] = {"num-cpus": str(spec.cpu)}
-    if spec.resources:
-        worker_params["resources"] = ray_resources_param(spec.resources)
-
+    """RayCluster spec shared by RayJob (`rayClusterSpec`) and RayService (`rayClusterConfig`)."""
+    volumes, mounts, env = storage
+    worker_params: dict[str, str] = {"num-cpus": str(cpu)}
+    if resources:
+        worker_params["resources"] = ray_resources_param(resources)
     # The head carries dashboard, GCS, autoscaler, the driver and (Ray Train V2) the 0-CPU
     # TrainController. Ray's memory monitor killed jobs at 1.5Gi (Phase 2: hello) and at 2Gi
     # (Phase 3: a torch-importing driver + controller reached 1.91GB), so it gets 3Gi.
     head = _container("ray-head", image, "1", _head_request(), HEAD_MEMORY_MIB, mounts, env)
     worker = _container(
-        "ray-worker",
-        image,
-        str(spec.cpu),
-        _worker_request(spec),
-        memory_mib(spec.memory),
-        mounts,
-        env,
+        "ray-worker", image, str(cpu), _worker_request(cpu, memory), memory_mib(memory), mounts, env
     )
-    submitter = _container(SUBMITTER_CONTAINER, image, "500m", SUBMITTER_REQUEST, 512)
+    return {
+        "rayVersion": ray_version,
+        "headGroupSpec": {
+            "rayStartParams": {"num-cpus": "0"},  # no tasks or replicas on the head
+            "template": {
+                "metadata": {"labels": labels},
+                "spec": {"containers": [head], "volumes": volumes},
+            },
+        },
+        "workerGroupSpecs": [
+            {
+                "groupName": "cpu",
+                "replicas": workers,
+                "minReplicas": workers,
+                "maxReplicas": workers,
+                "rayStartParams": worker_params,
+                "template": {
+                    "metadata": {"labels": labels},
+                    "spec": {"containers": [worker], "volumes": volumes},
+                },
+            }
+        ],
+    }
 
+
+def build_rayjob(
+    job_id: str, team: str, spec: JobSpec, *, image: str, ray_version: str
+) -> dict[str, Any]:
+    name = k8s_name(job_id)
+    has_code = bool(spec.files)
+    # KubeRay's submitter runs `ray job submit -- <entrypoint>` through a shell, so `cd x && ...`
+    # would split there. `env -C` changes directory without any shell operator.
+    entrypoint = f"env -C {CODE_DIR} {spec.entrypoint}" if has_code else spec.entrypoint
+    submitter = _container(SUBMITTER_CONTAINER, image, "500m", SUBMITTER_REQUEST, 512)
+    cluster = _ray_cluster(
+        _labels(job_id, team),
+        _ray_pod_storage(job_id, team, has_code, name),
+        workers=spec.workers,
+        cpu=spec.cpu,
+        memory=spec.memory,
+        resources=spec.resources,
+        image=image,
+        ray_version=ray_version,
+    )
     return {
         "apiVersion": "ray.io/v1",
         "kind": "RayJob",
@@ -148,53 +213,119 @@ def build_rayjob(
                 "metadata": {"labels": _labels(job_id, team)},
                 "spec": {"restartPolicy": "Never", "containers": [submitter]},
             },
-            "rayClusterSpec": {
-                "rayVersion": ray_version,
-                "headGroupSpec": {
-                    "rayStartParams": {"num-cpus": "0"},  # no tasks on the head
-                    "template": {
-                        "metadata": {"labels": _labels(job_id, team)},
-                        "spec": {"containers": [head], "volumes": volumes},
-                    },
-                },
-                "workerGroupSpecs": [
-                    {
-                        "groupName": "cpu",
-                        "replicas": spec.workers,
-                        "minReplicas": spec.workers,
-                        "maxReplicas": spec.workers,
-                        "rayStartParams": worker_params,
-                        "template": {
-                            "metadata": {"labels": _labels(job_id, team)},
-                            "spec": {"containers": [worker], "volumes": volumes},
-                        },
-                    }
-                ],
-            },
+            "rayClusterSpec": cluster,
         },
     }
 
 
-def build_code_configmap(
-    job_id: str, team: str, spec: JobSpec, *, owner_uid: str
+def serve_config(spec: ServiceSpec) -> dict[str, Any]:
+    """serveConfigV2: one app built by workloads/serve/app.py:build, autoscaled on in-flight
+    requests. Delays are short so the demo scales within a minute (defaults: 30s up, 600s down)."""
+    return {
+        "applications": [
+            {
+                "name": SERVE_APP,
+                "import_path": "app:build",
+                "route_prefix": "/",
+                # The team's checkpoint dir is mounted at CHECKPOINTS; the run is named by job id.
+                "args": {"run_dir": f"{CHECKPOINTS}/{spec.job_id}", "profile": spec.profile},
+                "deployments": [
+                    {
+                        "name": SERVE_DEPLOYMENT,
+                        "ray_actor_options": {"num_cpus": REPLICA_CPUS},
+                        "max_ongoing_requests": 8,
+                        "autoscaling_config": {
+                            "min_replicas": spec.min_replicas,
+                            "initial_replicas": spec.min_replicas,
+                            "max_replicas": spec.max_replicas,
+                            "target_ongoing_requests": spec.target_ongoing_requests,
+                            "upscale_delay_s": 5,
+                            "downscale_delay_s": 30,
+                            "metrics_interval_s": 2,
+                            "look_back_period_s": 10,
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def build_rayservice(
+    team: str, spec: ServiceSpec, *, image: str, ray_version: str
 ) -> dict[str, Any]:
-    """Owned by the RayJob, so deleting the RayJob garbage-collects the code too."""
-    name = k8s_name(job_id)
+    name = service_k8s_name(spec.name)
+    labels = _service_labels(spec.name, team)
+    cluster = _ray_cluster(
+        labels,
+        _ray_pod_storage(spec.job_id, team, True, name, checkpoints_readonly=True),
+        workers=spec.workers,
+        cpu=spec.cpu,
+        memory=spec.memory,
+        resources={},
+        image=image,
+        ray_version=ray_version,
+    )
+    return {
+        "apiVersion": "ray.io/v1",
+        "kind": "RayService",
+        "metadata": {"name": name, "labels": labels},
+        "spec": {
+            # JSON is valid YAML, and KubeRay parses this field as YAML.
+            "serveConfigV2": json.dumps(serve_config(spec), indent=2),
+            "rayClusterConfig": cluster,
+        },
+    }
+
+
+def code_configmap(
+    name: str,
+    labels: dict[str, str],
+    files: dict[str, str],
+    *,
+    owner_kind: str,
+    owner_uid: str,
+) -> dict[str, Any]:
+    """Owned by its RayJob/RayService (same name), so deleting that garbage-collects the code."""
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
         "metadata": {
             "name": name,
-            "labels": _labels(job_id, team),
+            "labels": labels,
             "ownerReferences": [
                 {
                     "apiVersion": "ray.io/v1",
-                    "kind": "RayJob",
+                    "kind": owner_kind,
                     "name": name,
                     "uid": owner_uid,
                     "blockOwnerDeletion": False,
                 }
             ],
         },
-        "data": dict(spec.files),
+        "data": dict(files),
     }
+
+
+def build_code_configmap(
+    job_id: str, team: str, spec: JobSpec, *, owner_uid: str
+) -> dict[str, Any]:
+    return code_configmap(
+        k8s_name(job_id),
+        _labels(job_id, team),
+        spec.files,
+        owner_kind="RayJob",
+        owner_uid=owner_uid,
+    )
+
+
+def build_service_configmap(
+    team: str, spec: ServiceSpec, files: dict[str, str], *, owner_uid: str
+) -> dict[str, Any]:
+    return code_configmap(
+        service_k8s_name(spec.name),
+        _service_labels(spec.name, team),
+        files,
+        owner_kind="RayService",
+        owner_uid=owner_uid,
+    )

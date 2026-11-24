@@ -7,21 +7,37 @@ import asyncio
 import contextlib
 import logging
 import secrets
-from collections.abc import AsyncIterator
-from typing import Annotated
+import sqlite3
+from collections.abc import AsyncIterator, Mapping
+from datetime import datetime
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
-from platform_api.admission import Admitter, QuotaExceeded
-from platform_api.config import Settings
+from platform_api.admission import Admitter, QuotaBusy, QuotaExceeded
+from platform_api.config import ROOT, Settings
 from platform_api.k8s import KubeClient, KubeError, RealKube
 from platform_api.logs import setup_logging
-from platform_api.models import TERMINAL, Job, JobSpec, JobState
-from platform_api.reconciler import run_forever
-from platform_api.registry import Registry
+from platform_api.manifests import service_endpoint
+from platform_api.models import (
+    TERMINAL,
+    Job,
+    JobSpec,
+    JobState,
+    Service,
+    ServiceSpec,
+    ServiceState,
+)
+from platform_api.reconciler import observe_service, run_forever
+from platform_api.registry import Registry, utcnow
 
 log = logging.getLogger("rkp.api")
+# The platform-owned serving code, shipped in the RayService's ConfigMap (like a job's code).
+SERVE_FILES = (
+    ROOT / "workloads" / "serve" / "app.py",
+    ROOT / "workloads" / "train" / "profiles.py",
+)
 
 
 def create_app(
@@ -126,5 +142,73 @@ def create_app(
         updated = registry.get(job.id)
         assert updated is not None
         return updated
+
+    def service_view(team: str, row: Mapping[str, Any]) -> Service:
+        spec = ServiceSpec.model_validate_json(row["spec"])
+        if row["deleted_at"]:
+            state, message = ServiceState.DELETED, None
+        else:
+            rs = kube.get_rayservice(team, row["k8s_name"])
+            if rs is None:
+                state, message = ServiceState.UNHEALTHY, "RayService was deleted outside rkp"
+            else:
+                state, message = observe_service(rs)
+        return Service(
+            name=spec.name,
+            team=team,
+            k8s_name=row["k8s_name"],
+            job_id=spec.job_id,
+            state=state,
+            message=message,
+            endpoint=service_endpoint(spec.name, team),
+            spec=spec.model_dump(),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            deleted_at=row["deleted_at"] and datetime.fromisoformat(row["deleted_at"]),
+        )
+
+    def live_service(name: str, team: Team) -> sqlite3.Row:
+        row = registry.live_service(team, name)
+        if row is None:
+            raise HTTPException(404, f"service {name} not found")
+        return row
+
+    LiveService = Annotated[sqlite3.Row, Depends(live_service)]
+
+    @app.post("/services", status_code=201)
+    def create_service(spec: ServiceSpec, team: Team) -> Service:
+        """Serve the latest checkpoint of one of the team's SUCCEEDED training jobs."""
+        job = registry.get(spec.job_id)
+        if job is None or job.team != team:  # another team's job is just "not found"
+            raise HTTPException(404, f"job {spec.job_id} not found")
+        if job.state != JobState.SUCCEEDED:
+            raise HTTPException(409, f"job {spec.job_id} is {job.state}, not SUCCEEDED")
+        if registry.live_service(team, spec.name) is not None:
+            raise HTTPException(409, f"service {spec.name} already exists")
+        files = {f.name: f.read_text() for f in SERVE_FILES}
+        try:
+            admitter.create_service(team, spec, files)
+        except QuotaExceeded as e:
+            raise HTTPException(422, str(e)) from None
+        except QuotaBusy as e:
+            raise HTTPException(409, str(e)) from None
+        row = registry.live_service(team, spec.name)
+        assert row is not None
+        return service_view(team, row)
+
+    @app.get("/services")
+    def list_services(team: Team) -> list[Service]:
+        return [service_view(team, r) for r in registry.live_services(team)]
+
+    @app.get("/services/{name}")
+    def get_service(row: LiveService, team: Team) -> Service:
+        return service_view(team, row)
+
+    @app.delete("/services/{name}")
+    def delete_service(row: LiveService, team: Team) -> Service:
+        kube.delete_rayservice(team, row["k8s_name"])
+        registry.mark_service_deleted(team, row["name"])
+        log.info("service deleted", extra={"team": team, "service": row["name"]})
+        deleted = {**dict(row), "deleted_at": utcnow().isoformat()}
+        return service_view(team, deleted)
 
     return app

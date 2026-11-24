@@ -12,6 +12,7 @@ from platform_api.manifests import SUBMITTER_CONTAINER
 from platform_api.models import Resources
 
 GROUP, VERSION, PLURAL = "ray.io", "v1", "rayjobs"
+SERVICES = "rayservices"
 UNBOUNDED = 10**9  # a quota that doesn't set requests.cpu / requests.memory
 
 
@@ -30,6 +31,13 @@ class KubeClient(Protocol):
         """Delete the RayJob and (through owner references) its cluster and code. Idempotent."""
 
     def create_configmap(self, namespace: str, body: dict[str, Any]) -> None: ...
+
+    def create_rayservice(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]: ...
+
+    def get_rayservice(self, namespace: str, name: str) -> dict[str, Any] | None: ...
+
+    def delete_rayservice(self, namespace: str, name: str) -> None:
+        """Delete the RayService and (through owner references) its cluster and code. Idempotent."""
 
     def job_logs(self, namespace: str, name: str, tail_lines: int | None = None) -> str | None:
         """Logs of the newest submitter pod, which tails the Ray driver. None if no pod yet."""
@@ -68,32 +76,50 @@ class RealKube:
     def _wrap(e: Exception) -> KubeError:
         return KubeError(getattr(e, "status", 0) or 0, getattr(e, "reason", None) or str(e))
 
-    def create_rayjob(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _create(self, plural: str, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._custom.create_namespaced_custom_object(
-                GROUP, VERSION, namespace, PLURAL, body
+                GROUP, VERSION, namespace, plural, body
             )
         except ApiException as e:
             raise self._wrap(e) from e
 
-    def get_rayjob(self, namespace: str, name: str) -> dict[str, Any] | None:
+    def _get(self, plural: str, namespace: str, name: str) -> dict[str, Any] | None:
         try:
             return self._custom.get_namespaced_custom_object(
-                GROUP, VERSION, namespace, PLURAL, name
+                GROUP, VERSION, namespace, plural, name
             )
         except ApiException as e:
             if e.status == 404:
                 return None
             raise self._wrap(e) from e
 
-    def delete_rayjob(self, namespace: str, name: str) -> None:
+    def _delete(self, plural: str, namespace: str, name: str) -> None:
         try:
             self._custom.delete_namespaced_custom_object(
-                GROUP, VERSION, namespace, PLURAL, name, body=self._delete_opts
+                GROUP, VERSION, namespace, plural, name, body=self._delete_opts
             )
         except ApiException as e:
             if e.status != 404:
                 raise self._wrap(e) from e
+
+    def create_rayjob(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._create(PLURAL, namespace, body)
+
+    def get_rayjob(self, namespace: str, name: str) -> dict[str, Any] | None:
+        return self._get(PLURAL, namespace, name)
+
+    def delete_rayjob(self, namespace: str, name: str) -> None:
+        self._delete(PLURAL, namespace, name)
+
+    def create_rayservice(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._create(SERVICES, namespace, body)
+
+    def get_rayservice(self, namespace: str, name: str) -> dict[str, Any] | None:
+        return self._get(SERVICES, namespace, name)
+
+    def delete_rayservice(self, namespace: str, name: str) -> None:
+        self._delete(SERVICES, namespace, name)
 
     def create_configmap(self, namespace: str, body: dict[str, Any]) -> None:
         try:

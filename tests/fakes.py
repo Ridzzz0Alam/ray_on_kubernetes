@@ -11,6 +11,7 @@ from platform_api.models import Resources
 class FakeKube:
     def __init__(self) -> None:
         self.rayjobs: dict[tuple[str, str], dict[str, Any]] = {}
+        self.rayservices: dict[tuple[str, str], dict[str, Any]] = {}
         self.configmaps: dict[tuple[str, str], dict[str, Any]] = {}
         self.logs: dict[tuple[str, str], str] = {}
         self.deleted: list[tuple[str, str]] = []
@@ -26,6 +27,19 @@ class FakeKube:
 
     def delete_rayjob(self, namespace: str, name: str) -> None:
         self.rayjobs.pop((namespace, name), None)
+        self.configmaps.pop((namespace, name), None)  # owner-reference cascade
+        self.deleted.append((namespace, name))
+
+    def create_rayservice(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
+        obj = {**body, "metadata": {**body["metadata"], "uid": str(uuid.uuid4())}}
+        self.rayservices[(namespace, body["metadata"]["name"])] = obj
+        return obj
+
+    def get_rayservice(self, namespace: str, name: str) -> dict[str, Any] | None:
+        return self.rayservices.get((namespace, name))
+
+    def delete_rayservice(self, namespace: str, name: str) -> None:
+        self.rayservices.pop((namespace, name), None)
         self.configmaps.pop((namespace, name), None)  # owner-reference cascade
         self.deleted.append((namespace, name))
 

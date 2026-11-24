@@ -4,6 +4,9 @@ Kubernetes checks quota one pod at a time. A RayJob is a gang (head + workers + 
 two half-admitted jobs could each hold a head and leave neither able to start its workers. The
 API admits a job only when all of its pods fit, keeps the rest QUEUED in submission order, and
 rejects up front a job that could never fit. The ResourceQuota stays as the hard backstop.
+
+Served models (RayServices) take quota too. They're long-running, so they aren't queued: one that
+doesn't fit right now is refused with QuotaBusy (HTTP 409).
 """
 
 from __future__ import annotations
@@ -13,8 +16,17 @@ import secrets
 import threading
 
 from platform_api.k8s import KubeClient, KubeError
-from platform_api.manifests import build_code_configmap, build_rayjob, job_requests, k8s_name
-from platform_api.models import Job, JobSpec, JobState, Resources
+from platform_api.manifests import (
+    build_code_configmap,
+    build_rayjob,
+    build_rayservice,
+    build_service_configmap,
+    job_requests,
+    k8s_name,
+    service_k8s_name,
+    service_requests,
+)
+from platform_api.models import Job, JobSpec, JobState, Resources, ServiceSpec
 from platform_api.registry import Registry
 
 log = logging.getLogger("rkp.admission")
@@ -22,6 +34,10 @@ log = logging.getLogger("rkp.admission")
 
 class QuotaExceeded(Exception):
     """The job is bigger than the team's whole quota, so it can never be admitted."""
+
+
+class QuotaBusy(Exception):
+    """A service doesn't fit next to the team's running work (or jobs are queued ahead)."""
 
 
 class Admitter:
@@ -34,13 +50,47 @@ class Admitter:
         self._lock = threading.Lock()
 
     def in_use(self, team: str) -> Resources:
-        """Requests of the team's admitted, unfinished jobs (counted from the registry, so a
-        RayJob whose pods don't exist yet still counts)."""
+        """Requests of the team's admitted, unfinished jobs and live services (counted from the
+        registry, so a RayJob whose pods don't exist yet still counts)."""
         total = Resources()
         for job in self.registry.active(team):
             if job.state != JobState.QUEUED:
                 total += job_requests(JobSpec.model_validate(job.spec))
+        for row in self.registry.live_services(team):
+            total += service_requests(ServiceSpec.model_validate_json(row["spec"]))
         return total
+
+    def create_service(self, team: str, spec: ServiceSpec, files: dict[str, str]) -> None:
+        """Create the RayService (+ its code) now, or raise QuotaExceeded / QuotaBusy."""
+        need = service_requests(spec)
+        with self._lock:
+            quota = self.kube.get_quota(team)
+            if quota is not None and not need.fits_in(quota):
+                raise QuotaExceeded(
+                    f"service requests {need} but {team}'s whole quota is {quota}: "
+                    "use fewer workers or less memory"
+                )
+            queued = [j for j in self.registry.active(team) if j.state == JobState.QUEUED]
+            if queued:
+                raise QuotaBusy(f"{len(queued)} of {team}'s jobs are queued for quota ahead of it")
+            if not self._fits_now(team, need, quota):
+                raise QuotaBusy(
+                    f"service needs {need}, {team} uses {self.in_use(team)} of {quota}: "
+                    "wait for running jobs to finish"
+                )
+            name = service_k8s_name(spec.name)
+            body = build_rayservice(team, spec, image=self.image, ray_version=self.ray_version)
+            created = self.kube.create_rayservice(team, body)
+            try:
+                cm = build_service_configmap(
+                    team, spec, files, owner_uid=created["metadata"]["uid"]
+                )
+                self.kube.create_configmap(team, cm)
+                self.registry.insert_service(team, name, spec)
+            except Exception:
+                self.kube.delete_rayservice(team, name)
+                raise
+            log.info("service created", extra={"team": team, "service": spec.name})
 
     def submit(self, team: str, spec: JobSpec) -> Job:
         need = job_requests(spec)

@@ -6,9 +6,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_CODE_BYTES = 512 * 1024  # ConfigMaps cap at 1 MiB; keep well under it
 _FILENAME = re.compile(r"[A-Za-z0-9_.-]+")
@@ -120,3 +120,74 @@ class Job(BaseModel):
     submitted_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+REPLICA_CPUS = 0.5  # Ray CPUs per Serve replica; replicas share the fixed worker pod(s)
+_SERVICE_NAME = re.compile(r"[a-z]([a-z0-9-]{0,18}[a-z0-9])?")
+
+
+class ServiceState(StrEnum):
+    DEPLOYING = "DEPLOYING"
+    RUNNING = "RUNNING"
+    UNHEALTHY = "UNHEALTHY"
+    DELETED = "DELETED"
+
+
+class ServiceSpec(BaseModel):
+    """Serve the latest checkpoint of one of the team's SUCCEEDED training jobs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="DNS-style name, unique within the team, e.g. sentiment")
+    job_id: str = Field(min_length=1, description="Training job whose checkpoint to serve")
+    profile: Literal["tiny", "distilbert"] = "tiny"
+    min_replicas: int = Field(default=1, ge=1, le=4)
+    max_replicas: int = Field(default=3, ge=1, le=4)
+    target_ongoing_requests: float = Field(default=2, gt=0, le=100)
+    # Replicas scale inside fixed worker pods (no pod autoscaling on the laptop): workers * cpu
+    # Ray CPUs must hold max_replicas * REPLICA_CPUS.
+    workers: int = Field(default=1, ge=1, le=2)
+    cpu: int = Field(default=2, ge=1, le=2, description="Ray CPUs (and CPU limit) per worker")
+    memory: str = Field(default="2Gi", description="Memory limit per worker")
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, name: str) -> str:
+        if not _SERVICE_NAME.fullmatch(name):
+            raise ValueError(
+                "name: lowercase letters, digits and '-', 1-20 chars, start with a letter"
+            )
+        return name
+
+    @field_validator("memory")
+    @classmethod
+    def _check_memory(cls, memory: str) -> str:
+        if not 512 <= memory_mib(memory) <= 4096:
+            raise ValueError("memory must be between 512Mi and 4Gi")
+        return memory
+
+    @model_validator(mode="after")
+    def _check_replicas(self) -> ServiceSpec:
+        if self.min_replicas > self.max_replicas:
+            raise ValueError("min_replicas must be <= max_replicas")
+        if self.max_replicas * REPLICA_CPUS > self.workers * self.cpu:
+            raise ValueError(
+                f"max_replicas={self.max_replicas} needs {self.max_replicas * REPLICA_CPUS:g} "
+                f"Ray CPUs but workers * cpu = {self.workers * self.cpu}"
+            )
+        return self
+
+
+class Service(BaseModel):
+    """A served model, as returned by the API. State is read live from the RayService."""
+
+    name: str
+    team: str
+    k8s_name: str
+    job_id: str
+    state: ServiceState
+    message: str | None = None
+    endpoint: str = Field(description="In-cluster URL of POST /predict")
+    spec: dict[str, Any]
+    created_at: datetime
+    deleted_at: datetime | None = None

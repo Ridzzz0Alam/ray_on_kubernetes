@@ -10,7 +10,7 @@ from typing import Any
 
 from platform_api.admission import Admitter
 from platform_api.k8s import KubeClient
-from platform_api.models import TERMINAL, Job, JobState
+from platform_api.models import TERMINAL, Job, JobState, ServiceState
 from platform_api.registry import Registry
 
 log = logging.getLogger("rkp.reconciler")
@@ -70,6 +70,28 @@ def observe(rayjob: dict[str, Any]) -> Observation:
     if ray_status in {"RUNNING", "SUCCEEDED", "FAILED", "STOPPED"}:
         return Observation(JobState.RUNNING, None, started)
     return Observation(JobState.PENDING)
+
+
+def observe_service(rayservice: dict[str, Any]) -> tuple[ServiceState, str | None]:
+    """Map a RayService's status to our service state.
+
+    KubeRay keeps the Serve app status in pendingServiceStatus until the first cluster is ready,
+    then in activeServiceStatus; the Ready condition (or the older serviceStatus) says it serves."""
+    status = rayservice.get("status") or {}
+    apps: dict[str, Any] = {}
+    for key in ("pendingServiceStatus", "activeServiceStatus"):
+        apps.update((status.get(key) or {}).get("applicationStatuses") or {})
+    for app in apps.values():
+        if app.get("status") in {"DEPLOY_FAILED", "UNHEALTHY"}:
+            return ServiceState.UNHEALTHY, _short(app.get("message")) or app["status"]
+    ready = any(
+        c.get("type") == "Ready" and c.get("status") == "True"
+        for c in status.get("conditions") or []
+    )
+    if ready or status.get("serviceStatus") == "Running":
+        return ServiceState.RUNNING, None
+    app_states = sorted({a.get("status", "") for a in apps.values()} - {""})
+    return ServiceState.DEPLOYING, f"serve app: {', '.join(app_states)}" if app_states else None
 
 
 def finalize(registry: Registry, kube: KubeClient, job: Job, obs: Observation) -> None:
