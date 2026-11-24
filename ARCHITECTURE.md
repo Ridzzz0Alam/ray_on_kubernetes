@@ -129,9 +129,9 @@ The node has about 4 vCPU and 15 GB. The stack target is **≤ 3 CPU requested a
 | KubeRay operator | 0.1 | 256 Mi | |
 | Ray head (per cluster) | 0.25 | 3 Gi | `num-cpus: 0`, so no tasks run on the head, but the driver, TrainController and Train V2 helper actors do. Measured 2.76 GiB during training |
 | Ray worker × 2 | 1 each | 1.5 Gi each | `tiny` profile, measured 1.33 GiB; `distilbert` needs about 2.5 Gi each |
-| Prometheus | 0.1 | 512 Mi | 6h retention, 30s scrape |
-| Grafana | 0.1 | 256 Mi | |
-| kube-state-metrics | 0.05 | 128 Mi | |
+| Prometheus | 0.05 | 512 Mi | 6h retention, 30s scrape. Measured idle: 43 MB |
+| Grafana | 0.025 | 384 Mi | OOM-killed at 256Mi during start-up. Measured idle: 236 MB |
+| kube-state-metrics | 0.01 | 128 Mi | Measured idle: 14 MB |
 | platform_api (host) | – | ~150 MB | uvicorn, outside the cluster |
 | **Total (one training job + monitoring)** | **~3.1** | **~8.5 GB** | Sum of limits, which are ceilings. Measured: **6.9 GiB for `tiny` training with no monitoring**, already near the 7 GB target. Phase 7 must keep monitoring small or turn it on only for demos |
 
@@ -148,13 +148,21 @@ Turn monitoring off when you don't need it (`make monitoring-down`).
 
 ## 8. Observability
 
-- **Metrics sources:** Ray (built-in Prometheus exporter on head/worker pods, through a PodMonitor), the API's
-  `/metrics` (`prometheus_client`), and kube-state-metrics (`kube_resourcequota`, pod phases).
-- **Key metrics:** `rkp_jobs_total{team,state}`, `rkp_job_queue_seconds_bucket{team}`,
-  `rkp_job_runtime_seconds{team}`, `ray_node_cpu_utilization`, `kube_resourcequota{namespace}`.
-- **Dashboard:** job states per team, p50/p95 queue time, CPU/mem used vs. quota, Serve replicas and QPS.
-- **Cost:** `cost = Σ runtime × (cpu_req × cpu_rate + mem_gb × mem_rate [+ gpu × gpu_rate])` from the registry.
-  Rates go in `config/rates.yaml`.
+- **Metrics sources:** Ray's metrics agent on every rkp head/worker pod (Prometheus `kubernetes_sd` on pods, keeping
+  the port named `metrics`), the API (a collector in `platform_api/metrics.py` that computes everything from the
+  registry at scrape time), and kube-state-metrics (`kube_resourcequota`; collectors limited to resourcequotas, pods
+  and namespaces). The API runs on the host, so `make api` adds a metrics-only listener on the kind network gateway
+  (`RKP_METRICS_ADDR`, e.g. `172.18.0.1:9108`). Prometheus scrapes that, and the REST API stays on 127.0.0.1.
+- **Key metrics:** `rkp_jobs_total{team,state}` (finished jobs), `rkp_jobs_active{team,state}`,
+  `rkp_job_queue_seconds{team}` / `rkp_job_runtime_seconds{team}` (histograms), `rkp_job_last_queue_seconds{team}`,
+  `rkp_job_oldest_waiting_seconds{team}`, `rkp_services_live{team}`, `ray_node_cpu_utilization`, `ray_node_mem_used`,
+  `ray_serve_autoscaling_target_replicas`, `ray_serve_num_http_requests_total`, `kube_resourcequota{namespace}`.
+- **Dashboard** (`dashboards/rkp.json`, provisioned by `make monitoring`): queue time per team (last started job, oldest
+  waiting job, p50/p95), jobs by state, outcomes, runtime, CPU/memory requests vs. quota, Ray node CPU/memory,
+  Serve replicas and requests/s. Demo: `docs/demos/observability.md`.
+- **Cost:** `GET /cost?since=7d` (the caller's team) and `rkp cost` (every team the CLI has a key for).
+  `cost = Σ hours_held × (cpu_requests × cpu_rate + mem_requests_GiB × gb_rate)`. A job is held from driver start to
+  finish and a service from create to delete, both clipped to the window. Rates are in `config/rates.yaml`.
 
 ## 9. Production gaps (deliberately not built)
 

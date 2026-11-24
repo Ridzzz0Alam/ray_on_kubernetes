@@ -120,17 +120,17 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 **Acceptance**
 - [x] Replicas scale from 1 to at least 2 under load, and back down afterwards. p50 latency is reported
 
-## Phase 7: Observability + cost (Sun afternoon)
+## Phase 7: Observability + cost (Sun afternoon) ✅
 
-- [ ] Minimal Prometheus + Grafana via Helm (no Alertmanager or node-exporter, 6h retention)
-- [ ] Scrape Ray metrics, the API's `/metrics` and kube-state-metrics
-- [ ] API metrics: `rkp_jobs_total{team,state}`, `rkp_job_queue_seconds{team}`, `rkp_job_runtime_seconds{team}`
-- [ ] Grafana dashboard JSON in `dashboards/`
-- [ ] `rkp cost --since 7d`: CPU-hours and GB-hours per team × rates from `config/rates.yaml`
+- [x] Minimal Prometheus + Grafana via Helm (no Alertmanager or node-exporter, 6h retention)
+- [x] Scrape Ray metrics, the API's `/metrics` and kube-state-metrics
+- [x] API metrics: `rkp_jobs_total{team,state}`, `rkp_job_queue_seconds{team}`, `rkp_job_runtime_seconds{team}`
+- [x] Grafana dashboard JSON in `dashboards/`
+- [x] `rkp cost --since 7d`: CPU-hours and GB-hours per team × rates from `config/rates.yaml`
 
 **Acceptance**
-- [ ] After the Phase 6 demo, the dashboard shows team-a's queue time going up and team-b's staying flat
-- [ ] Cost report numbers are unit-tested against the registry
+- [x] After the Phase 6 demo, the dashboard shows team-a's queue time going up and team-b's staying flat
+- [x] Cost report numbers are unit-tested against the registry
 
 ## Phase 8: GPU awareness (Sun evening)
 
@@ -196,3 +196,9 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-24 | Serve autoscaling delays are 5s up and 30s down (Ray defaults: 30s / 600s) | So the demo scales up and back down within a minute or two |
 | 2026-11-24 | Services count against the team quota but aren't queued: the API returns 409 when the quota is busy, and 422 when a service could never fit | A long-running service waiting in a queue behind jobs isn't useful. Counting it keeps the Phase 6 ceilings honest |
 | 2026-11-24 | Serve code ships in a RayService-owned ConfigMap (`app.py` + `profiles.py`), not baked into the image | Same mechanism as job code: no image rebuild, and it's garbage-collected with the service |
+| 2026-11-24 | Pins: prometheus chart 29.47.0 (Prometheus v3.16.0), grafana-community/grafana 14.4.1 (Grafana 13.3.1) | Newest releases at least 2 weeks old. `grafana/helm-charts` stopped publishing in Jan 2026; the chart moved to grafana-community |
+| 2026-11-24 | API metrics are computed from the SQLite registry at scrape time (a custom collector), not counted in process | The registry is the source of truth. The numbers survive API restarts and match `rkp list`. `rkp_jobs_total` counts only finished (terminal) jobs so it stays monotonic. Live states are a separate gauge, `rkp_jobs_active` |
+| 2026-11-24 | A second, metrics-only listener binds the kind network gateway (`make api` sets `RKP_METRICS_ADDR`). The API itself stays on 127.0.0.1 | Prometheus runs in kind and the API runs on the host. Binding the bridge address means pods can scrape it but the LAN can't |
+| 2026-11-24 | Monitoring images are saved for the local platform only (`docker save --platform`) and loaded with `kind load image-archive`, with `pullPolicy: Never` | `kind load docker-image` imports `--all-platforms` and fails on multi-arch images under Docker's containerd image store. Without `Never` the node silently pulled the image at pod start |
+| 2026-11-24 | Grafana limit 256Mi → 384Mi, with unified alerting and plugin pre-install off | Grafana 13 was OOM-killed at 256Mi during start-up. It idles at about 236 MB |
+| 2026-11-24 | Cost = pod requests × time held (job: driver start → finish; service: create → delete), clipped to the window | It bills what a team reserves against its quota. Queued jobs hold nothing. Cluster start-up before driver start (~35s) isn't billed, because the registry has no admitted-at time |

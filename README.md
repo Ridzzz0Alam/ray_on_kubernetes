@@ -158,7 +158,7 @@ Measured: replicas went **1 → 3** under load and back to 1 38s after it stoppe
 Throughput was capped at about 90 req/s by the single Serve HTTP proxy (100% of one core), not by the replicas
 ([recorded run and analysis](docs/demos/serving.md)).
 
-## 8. Observability and cost 🚧
+## 8. Observability and cost ✅
 
 | Metric | Source | Question it answers |
 |---|---|---|
@@ -168,8 +168,12 @@ Throughput was capped at about 90 req/s by the single Serve HTTP proxy (100% of 
 | `ray_node_cpu_utilization`, Serve QPS / replicas | Ray | Are workers busy, and is autoscaling working? |
 | `kube_resourcequota{namespace}` | kube-state-metrics | How close is each team to its quota? |
 
-**Cost report** (`rkp cost --since 7d`):
-`cost = Σ runtime × (cpu × cpu_rate + mem_GB × mem_rate [+ gpu × gpu_rate])`, with rates in `config/rates.yaml`.
+`make monitoring` installs a minimal Prometheus + Grafana (~0.3 GB idle) with the `rkp platform` dashboard. The API's
+metrics are computed from the job registry at scrape time. After the noisy-neighbour demo the dashboard shows team-a's
+queue time stepping 34s → 141s → 246s while team-b's stays at 33s ([recorded run with screenshots](docs/demos/observability.md)).
+
+**Cost report** (`rkp cost --since 7d`): pod requests × time held (job: driver start → finish; service: create →
+delete), × rates from `config/rates.yaml`. The arithmetic is unit-tested against registry rows.
 
 **GPU awareness:** a `gpu-sim` worker group advertises the Ray custom resource `sim_gpu`. Jobs that request it
 wait for that group's capacity, while CPU jobs keep running. This exercises the scheduling logic with no hardware.
@@ -214,6 +218,9 @@ make data        # training data + model → .shared/data (once; PROFILE=distilb
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
+make monitoring  # minimal Prometheus + Grafana (~0.3 GB idle); make monitoring-down before long training runs
+make grafana     # dashboard on http://127.0.0.1:3000/d/rkp
+uv run rkp cost --since 7d                          # CPU-hours, GB-hours and cost per team
 make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC, serving (~14 min)
 make down        # tear everything down
 ```
@@ -247,7 +254,7 @@ These will be filled in from real runs. No numbers until they're measured.
 | Work lost when a worker is killed mid-epoch | The partial epoch only: resumed from the epoch-1 checkpoint and finished at 85.6% |
 | Team-b queue time while team-a is saturated | 34s, the same as an unloaded cluster (team-a: 34s → 137s → 244s) |
 | Serve replicas under load / p50 latency | 1 → 3 → 1 replicas; p50 12 ms (1 client) to 210 ms (20 clients), about 90 req/s through one Serve proxy |
-| Peak stack RAM | 6.9 GiB for `tiny` training (head 2.76 + 2 × 1.33 GiB workers + kind + operator, counted as Ray does, without page cache), against a 7 GB budget. Monitoring isn't included yet |
+| Peak stack RAM | 6.9 GiB for `tiny` training (head 2.76 + 2 × 1.33 GiB workers + kind + operator, counted as Ray does, without page cache), and **7.01 GiB with monitoring on**, against a 7 GB budget. 4.53 GiB for the 2-team demo with monitoring |
 
 ## 13. What production would change
 
@@ -270,6 +277,6 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 |---|---|---|---|
 | 0 Bootstrap | ✅ | 5 Ray Serve | ✅ |
 | 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | ✅ |
-| 2 API + SDK | ✅ | 7 Observability + cost | 🚧 |
+| 2 API + SDK | ✅ | 7 Observability + cost | ✅ |
 | 3 Distributed training | ✅ | 8 GPU awareness | 🚧 |
 | 4 Lifecycle | ✅ | 9 Polish + full case study | 🚧 |
