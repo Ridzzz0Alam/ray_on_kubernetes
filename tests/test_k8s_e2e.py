@@ -7,12 +7,14 @@ The API runs in-process with the real Kubernetes client; reconcile_once is drive
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -76,10 +78,12 @@ def gone(kube: RealKube, name: str, timeout: float = 60) -> bool:
     return True
 
 
-def pods_gone(kube: RealKube, job_id: str, timeout: float = 90, team: str = "team-a") -> bool:
-    """No pod at all (head, worker or submitter) is left for the job."""
+def pods_gone(
+    kube: RealKube, job_id: str, timeout: float = 90, team: str = "team-a", label: str = "job-id"
+) -> bool:
+    """No pod at all (head, worker or submitter) is left for the job (or service)."""
     deadline = time.monotonic() + timeout
-    while kube._core.list_namespaced_pod(team, label_selector=f"rkp.io/job-id={job_id}").items:
+    while kube._core.list_namespaced_pod(team, label_selector=f"rkp.io/{label}={job_id}").items:
         if time.monotonic() > deadline:
             return False
         time.sleep(3)
@@ -244,3 +248,59 @@ def test_noisy_neighbour_queues_team_a_but_not_team_b(api: tuple[TestClient, Rea
             if http.get(f"/jobs/{job['id']}").json()["state"] not in DONE:
                 http.delete(f"/jobs/{job['id']}")
         assert pods_gone(kube, hog["id"]) and pods_gone(kube, extra["id"])
+
+
+def test_serve_latest_checkpoint_then_delete(api: tuple[TestClient, RealKube]) -> None:
+    """Phase 5: train 1 epoch, serve its checkpoint as a RayService, predict, then delete."""
+    http, kube = api
+    r = http.post(
+        "/jobs", json={**TRAIN, "entrypoint": "python train.py --profile tiny --epochs 1"}
+    )
+    job_id = r.json()["id"]
+    pf: subprocess.Popen[str] | None = None
+    try:
+        job = wait_for(http, job_id, DONE, timeout=600)
+        assert job["state"] == "SUCCEEDED", job["message"]
+        r = http.post("/services", json={"name": "e2e", "job_id": job_id})
+        assert r.status_code == 201, r.text
+        deadline = time.monotonic() + 300
+        while (svc := http.get("/services/e2e").json())["state"] != "RUNNING":
+            assert svc["state"] == "DEPLOYING", svc
+            assert time.monotonic() < deadline, "service never became RUNNING"
+            time.sleep(5)
+
+        pf = subprocess.Popen(
+            [
+                "kubectl",
+                "--context",
+                "kind-rkp",
+                "-n",
+                "team-a",
+                "port-forward",
+                "svc/rkp-svc-e2e-serve-svc",
+                ":8000",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        assert pf.stdout is not None
+        m = re.search(r"127\.0\.0\.1:(\d+)", pf.stdout.readline())
+        assert m, "port-forward did not start"
+        out = httpx.post(
+            f"http://127.0.0.1:{m[1]}/predict",
+            json={"texts": ["Great product, works perfectly.", "Broke after two days."]},
+            timeout=30,
+        ).json()
+        assert [p["label"] in {"positive", "negative"} for p in out["predictions"]] == [True] * 2
+        assert out["checkpoint"].startswith("checkpoint_2")
+
+        assert http.delete("/services/e2e").json()["state"] == "DELETED"
+        assert http.get("/services").json() == []
+        assert pods_gone(kube, "e2e", label="service")
+        assert kube.get_rayservice("team-a", "rkp-svc-e2e") is None
+    finally:
+        if pf:
+            pf.kill()
+        if http.get("/services").json():
+            http.delete("/services/e2e")
+        shutil.rmtree(CHECKPOINTS / job_id, ignore_errors=True)
