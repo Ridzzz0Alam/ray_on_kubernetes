@@ -1,4 +1,4 @@
-"""`rkp` CLI: submit | status | logs | cancel | list."""
+"""`rkp` CLI: submit | status | logs | cancel | list | cost."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Annotated
 
 import typer
 
-from sdk.client import Client, RkpError, load_code
+from sdk.client import Client, RkpError, configured_teams, load_code
 
 app = typer.Typer(help="Submit and manage Ray jobs on the rkp platform.", no_args_is_help=True)
 
@@ -109,6 +109,36 @@ def list_jobs(
     for j in jobs:
         submitted = j["submitted_at"][:19].replace("T", " ")
         typer.echo(f"{j['id']:10} {j['state']:10} {submitted:20} {j['spec']['entrypoint']}")
+
+
+@app.command()
+def cost(
+    team: TeamOpt = None,
+    since: Annotated[str, typer.Option(help="Window: 90m, 24h, 7d, 2w")] = "7d",
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """CPU-hours, GB-hours and cost per team (every team you have a key for, or --team)."""
+    teams = [team] if team else configured_teams() or [None]
+    reports = [_client(t).cost(since) for t in teams]
+    if as_json:
+        typer.echo(json.dumps(reports, indent=2))
+        return
+    cur = reports[0]["currency"]
+    typer.echo(f"usage over the last {since} (requests x time; rates from config/rates.yaml)")
+    typer.echo(
+        f"{'TEAM':10} {'JOBS':>5} {'SVCS':>5} {'CPU-HOURS':>10} {'GB-HOURS':>10} {'COST':>10}"
+    )
+    for r in reports:
+        kinds = [line["kind"] for line in r["lines"]]
+        typer.echo(
+            f"{r['team']:10} {kinds.count('job'):>5} {kinds.count('service'):>5} "
+            f"{r['cpu_hours']:>10.3f} {r['gb_hours']:>10.3f} {r['cost']:>10.4f} {cur}"
+        )
+    if len(reports) > 1:
+        cpu = sum(r["cpu_hours"] for r in reports)
+        gb = sum(r["gb_hours"] for r in reports)
+        total = sum(r["cost"] for r in reports)
+        typer.echo(f"{'total':10} {'':>5} {'':>5} {cpu:>10.3f} {gb:>10.3f} {total:>10.4f} {cur}")
 
 
 def main() -> None:

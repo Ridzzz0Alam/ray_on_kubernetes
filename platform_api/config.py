@@ -48,6 +48,9 @@ class Settings:
     ray_version: str
     kube_context: str | None = None
     reconcile_interval: float = 5.0
+    # host:port for a second, metrics-only listener that Prometheus in kind can reach (make api).
+    metrics_addr: str | None = None
+    rates_path: Path = ROOT / "config" / "rates.yaml"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -60,4 +63,5 @@ class Settings:
             ray_version=versions["RAY_VERSION"],
             kube_context=os.environ.get("RKP_KUBE_CONTEXT", "kind-rkp") or None,
             reconcile_interval=float(os.environ.get("RKP_RECONCILE_INTERVAL", "5")),
+            metrics_addr=os.environ.get("RKP_METRICS_ADDR") or None,
         )

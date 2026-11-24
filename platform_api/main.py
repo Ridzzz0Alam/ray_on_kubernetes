@@ -13,13 +13,16 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, start_http_server
 
 from platform_api.admission import Admitter, QuotaBusy, QuotaExceeded
 from platform_api.config import ROOT, Settings
+from platform_api.cost import Rates, TeamCost, parse_since, team_cost
 from platform_api.k8s import KubeClient, KubeError, RealKube
 from platform_api.logs import setup_logging
 from platform_api.manifests import service_endpoint
+from platform_api.metrics import make_registry
 from platform_api.models import (
     TERMINAL,
     Job,
@@ -52,9 +55,16 @@ def create_app(
     registry = Registry(settings.db_path)
     admitter = Admitter(registry, kube, image=settings.image, ray_version=settings.ray_version)
 
+    metrics = make_registry(registry, settings.api_keys.values())
+
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = None
+        server = None
+        if settings.metrics_addr:  # e.g. 172.18.0.1:9108, reachable from kind pods only
+            host, _, port = settings.metrics_addr.rpartition(":")
+            server, _thread = start_http_server(int(port), addr=host, registry=metrics)
+            log.info("metrics listener", extra={"addr": settings.metrics_addr})
         if run_reconciler:
             task = asyncio.create_task(
                 run_forever(registry, kube, admitter, settings.reconcile_interval)
@@ -64,6 +74,8 @@ def create_app(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        if server:
+            server.shutdown()
 
     app = FastAPI(title="rkp platform API", version="0.1.0", lifespan=lifespan)
     app.state.registry = registry
@@ -98,6 +110,21 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/metrics")
+    def prometheus_metrics() -> Response:
+        """Per-team job and service metrics from the registry (no key: aggregate numbers only)."""
+        return Response(generate_latest(metrics), media_type=CONTENT_TYPE_LATEST)
+
+    @app.get("/cost")
+    def cost(team: Team, since: Annotated[str, Query()] = "7d") -> TeamCost:
+        """The caller's team usage in [now - since, now]: CPU-hours, GB-hours and cost."""
+        try:
+            window = parse_since(since)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        until = utcnow()
+        return team_cost(registry, team, until - window, until, Rates.load(settings.rates_path))
 
     @app.post("/jobs", status_code=201)
     def submit(spec: JobSpec, team: Team) -> Job:

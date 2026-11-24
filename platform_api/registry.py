@@ -128,6 +128,11 @@ class Registry:
             rows = c.execute(sql + " ORDER BY submitted_at, rowid", args).fetchall()
         return [self._to_job(r) for r in rows]
 
+    def all_jobs(self) -> list[Job]:
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM jobs ORDER BY submitted_at, rowid").fetchall()
+        return [self._to_job(r) for r in rows]
+
     def spec(self, job_id: str) -> JobSpec:
         """The full submitted spec, files included (Job.spec leaves them out)."""
         with self._conn() as c:
@@ -194,6 +199,13 @@ class Registry:
             sql, args = sql + " AND team = ?", (team,)
         with self._conn() as c:
             return c.execute(sql + " ORDER BY created_at", args).fetchall()
+
+    def services(self, team: str) -> list[sqlite3.Row]:
+        """Every deployment of the team's services, deleted ones included (for cost)."""
+        with self._conn() as c:
+            return c.execute(
+                "SELECT * FROM services WHERE team = ? ORDER BY created_at", (team,)
+            ).fetchall()
 
     def live_service(self, team: str, name: str) -> sqlite3.Row | None:
         with self._conn() as c:

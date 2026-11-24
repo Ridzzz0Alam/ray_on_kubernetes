@@ -31,6 +31,13 @@ def config_path() -> Path:
     return home if home.exists() else Path("config") / "rkp.toml"
 
 
+def configured_teams() -> list[str]:
+    """Teams that have a key in the config file (the dev config has team-a and team-b)."""
+    path = config_path()
+    cfg: dict[str, Any] = tomllib.loads(path.read_text()) if path.exists() else {}
+    return sorted(cfg.get("keys") or {}) or [t for t in [cfg.get("default_team")] if t]
+
+
 def resolve(team: str | None = None) -> tuple[str, str]:
     """Return (api_url, api_key). Env vars RKP_API_URL / RKP_API_KEY win over the config file."""
     path = config_path()
@@ -87,6 +94,10 @@ class Client:
     def logs(self, job_id: str, tail: int | None = None) -> str:
         params = {"tail": tail} if tail else {}
         return self._call("GET", f"/jobs/{job_id}/logs", params=params).text
+
+    def cost(self, since: str = "7d") -> dict:
+        """Usage and cost of this key's team over the last `since` (90m, 24h, 7d, 2w)."""
+        return self._call("GET", "/cost", params={"since": since}).json()
 
     def cancel(self, job_id: str) -> dict:
         return self._call("DELETE", f"/jobs/{job_id}").json()

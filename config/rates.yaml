@@ -1,0 +1,6 @@
+# Rates for `rkp cost`: price per requested vCPU-hour and per requested GiB-hour.
+# Reference point: GCP e2 on-demand list prices in us-central1 (approximate; check current pricing
+# before quoting real numbers). Change these to your own internal chargeback rates.
+currency: USD
+cpu_hour: 0.021811
+gb_hour: 0.002923
