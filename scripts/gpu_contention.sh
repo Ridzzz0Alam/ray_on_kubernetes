@@ -42,8 +42,8 @@ while true; do
 done
 echo "== all done after $((SECONDS - start))s"
 for id in "$a_gpu" "$b_gpu"; do
-  team=team-a
-  [[ $id == "$b_gpu" ]] && team=team-b
+  team="team-a"
+  [[ $id == "$b_gpu" ]] && team="team-b"
   echo "== $team $id: where the GPU steps ran"
   rkp logs --team "$team" "$id" | grep -E "sim_gpu|gpu step" | sed 's/^/  /' | head -4
 done
