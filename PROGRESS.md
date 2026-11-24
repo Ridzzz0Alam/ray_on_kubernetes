@@ -6,6 +6,34 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-24: Phase 4 complete (checkpoint, resume, retry, cancel)
+
+**Done**
+- `train.py`: rank 0 saves `{model, optim, sched, epoch}` to `state.pt` each epoch through `ray.train.report(..., checkpoint=)`.
+  It uses `CheckpointConfig(num_to_keep=2)` and `FailureConfig(max_failures=3)`. On start it restores from `get_checkpoint()` and prints
+  `[rank 0] resumed from checkpoint at epoch N`.
+- Reconciler: the FAILED message reads `failed after N attempts: …` (from KubeRay `status.failed`), and RETRYING reads `attempt k of N failed`.
+- `scripts/chaos_kill_worker.sh <team> <job-id>` waits for the first `checkpoint_<ts>/` dir in `.shared`, then deletes one worker pod.
+- `make test-k8s` now has 5 tests. The new ones are worker-kill resume, an always-failing job with `retries=2`, and cancel during training with no pods left.
+- Tests: 46 unit tests, 5 k8s tests, all passing. `make test-k8s` takes **9m36s**.
+
+**Measured (chaos run):** the kill landed during epoch 2. Rank 1 got a gloo "connection reset", and the controller logged
+"Error count: 1 (max allowed: 3)". It restarted the group and resumed at epoch 1, then epoch 2 finished at 85.6%. Submit → SUCCEEDED in about 2m50s
+(about 2m27s without the kill). I didn't measure memory during the recovery.
+
+**State:** the cluster is deleted. `.shared/checkpoints/team-a/` still has 6 run dirs from Phase 3 (git-ignored, safe to delete).
+
+**Next: Phase 6** (multi-tenancy, done before 5). It covers ResourceQuotas for team-a/team-b and the noisy-neighbour demo with the `tiny` profile (see PLAN.md).
+
+**Gotchas**
+- Ray writes `checkpoint_manager_snapshot.json` next to the `checkpoint_<ts>/` dirs, so match dirs only (`checkpoint_2*/`).
+- Ray also prints `[rank 0]` lines twice in the driver logs (they get echoed). Tests use `in` and don't count them.
+- Never reuse a job id as a run name. Ray Train restores any existing run with the same `storage_path` + `name`. That's how
+  `backoffLimit` retries resume, but it would also make a "new" run resume an old one.
+- shellcheck isn't installed locally, only in CI.
+
+---
+
 ## 2026-11-23: Phase 3 complete (Ray Train)
 
 **Done**

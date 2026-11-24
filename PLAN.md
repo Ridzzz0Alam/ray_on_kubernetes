@@ -84,18 +84,18 @@ reached SUCCEEDED in 2m27s: about 40s of pod start-up, then 97s of training at a
 was 85.1% after epoch 1 and 85.3% after epoch 2 (seed 0, the same in 4 runs). Peak memory, measured the way Ray
 counts it (cgroup minus page cache): head 2.76 GiB, workers 1.33 GiB each, node 6.9 GiB.
 
-## Phase 4: Lifecycle (checkpoint, resume, retry, cancel) (Sat evening)
+## Phase 4: Lifecycle (checkpoint, resume, retry, cancel) (Sat evening) ✅
 
-- [ ] Checkpoint every epoch to `/shared/checkpoints/<team>/<job>` (`CheckpointConfig(num_to_keep=2)`)
-- [ ] Resume from `ray.train.get_checkpoint()`, restoring model, optimizer and epoch
-- [ ] `FailureConfig(max_failures=3)` for worker retries, and RayJob `backoffLimit` for job retries
-- [ ] `scripts/chaos_kill_worker.sh`: deletes a worker pod partway through training
+- [x] Checkpoint every epoch to `/shared/checkpoints/<team>/<job>` (`CheckpointConfig(num_to_keep=2)`)
+- [x] Resume from `ray.train.get_checkpoint()`, restoring model, optimizer and epoch
+- [x] `FailureConfig(max_failures=3)` for worker retries, and RayJob `backoffLimit` for job retries
+- [x] `scripts/chaos_kill_worker.sh`: deletes a worker pod partway through training
 
 **Acceptance**
-- [ ] Kill a worker during epoch 2. The job SUCCEEDS, and the logs show it resumed from the epoch-1 checkpoint
-- [ ] An entrypoint that always fails is retried N times and then marked FAILED
-- [ ] Cancelling during training leaves no Ray pods behind
-- [ ] This is covered by `make test-k8s`
+- [x] Kill a worker during epoch 2. The job SUCCEEDS, and the logs show it resumed from the epoch-1 checkpoint
+- [x] An entrypoint that always fails is retried N times and then marked FAILED
+- [x] Cancelling during training leaves no Ray pods behind
+- [x] This is covered by `make test-k8s`
 
 ## Phase 6: Multi-tenancy (Sun morning)
 
@@ -185,3 +185,6 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-23 | Default worker memory 1 Gi → 1.5 Gi | A Ray Train worker with torch + transformers peaked at 1.33 GB |
 | 2026-11-23 | `bert-tiny` lr 1e-3, batch 32, linear decay | It reached 85% on the first try. bert-tiny tolerates a high learning rate |
 | 2026-11-23 | Python deps resolved with `uv lock --exclude-newer 2026-11-09` | Same "at least 2 weeks old" rule as the other pins. Ruff stays on 0.17.5 from Phase 0 |
+| 2026-11-24 | Only rank 0 saves the checkpoint (`{model, optim, sched, epoch}` in one `state.pt`). Every rank still calls `ray.train.report` | DDP weights are identical on every rank. One copy halves the disk writes on the shared hostPath |
+| 2026-11-24 | The retry count comes from KubeRay's `status.failed`: FAILED says `failed after N attempts: ...`, RETRYING says `attempt k of N failed` | The RayJob gets deleted once it finishes, so the registry message is the only place the attempt count survives |
+| 2026-11-24 | `chaos_kill_worker.sh` triggers on the first `checkpoint_<ts>/` dir showing up in the host's `.shared` | It doesn't parse logs or depend on timing, and it reliably lands during epoch 2. The glob needs the trailing `/`, because Ray also writes `checkpoint_manager_snapshot.json` |

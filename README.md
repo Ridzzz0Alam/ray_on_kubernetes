@@ -120,8 +120,6 @@ $ rkp logs <id> | grep 'rank 0'
 [rank 0] {'epoch': 2, 'train_loss': 0.2303, 'eval_loss': 0.3455, 'eval_accuracy': 0.853, 'epoch_seconds': 35.7}
 ```
 
-The fault-tolerance mechanisms below are Phase 4.
-
 Fault tolerance has two layers:
 
 | Failure | Handled by | Effect |
@@ -209,7 +207,7 @@ make data        # training data + model → .shared/data (once; PROFILE=distilb
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
-make test-k8s    # end-to-end submit / logs / cancel against kind (~2 min)
+make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries (~10 min)
 make down        # tear everything down
 ```
 
@@ -224,7 +222,7 @@ kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).
 | Config guard | Every version pinned, node image pinned by digest | `tests/test_versions.py` | ✅ |
 | Unit | JobSpec → RayJob manifest, auth and team scoping, reconciler, CLI (fake K8s client) | `make test` | ✅ |
 | Integration | Submit / status / logs / cancel against kind | `make test-k8s` | ✅ |
-| Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh` | 🚧 |
+| Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh`, run by `make test-k8s` | ✅ |
 | Tenancy | Noisy neighbour: team-b unaffected by team-a saturation | `scripts/noisy_neighbour.sh` | 🚧 |
 | Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` | 🚧 |
 
