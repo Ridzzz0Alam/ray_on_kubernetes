@@ -30,21 +30,31 @@ class JobState(StrEnum):
 TERMINAL = frozenset({JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED})
 
 
+UNBOUNDED = 10**9  # a quota that doesn't set a resource
+GPU_RESOURCE = "example.com/gpu"  # simulated GPU: node extended resource (`make gpu-sim`)
+SIM_GPU = "sim_gpu"  # the Ray custom resource a gpu-sim worker advertises, one per pod
+
+
 @dataclass(frozen=True)
 class Resources:
-    """Pod resource *requests*: what a ResourceQuota's requests.cpu / requests.memory count."""
+    """Pod resource *requests*: what a ResourceQuota's requests.cpu / requests.memory /
+    requests.example.com/gpu count."""
 
     cpu_m: int = 0
     mem_mib: int = 0
+    gpu: int = 0
 
     def __add__(self, other: Resources) -> Resources:
-        return Resources(self.cpu_m + other.cpu_m, self.mem_mib + other.mem_mib)
+        return Resources(
+            self.cpu_m + other.cpu_m, self.mem_mib + other.mem_mib, self.gpu + other.gpu
+        )
 
     def fits_in(self, other: Resources) -> bool:
-        return self.cpu_m <= other.cpu_m and self.mem_mib <= other.mem_mib
+        return self.cpu_m <= other.cpu_m and self.mem_mib <= other.mem_mib and self.gpu <= other.gpu
 
     def __str__(self) -> str:
-        return f"{self.cpu_m / 1000:g} CPU / {self.mem_mib}Mi"
+        text = f"{self.cpu_m / 1000:g} CPU / {self.mem_mib}Mi"
+        return text + (f" / {self.gpu} GPU" if 0 < self.gpu < UNBOUNDED else "")
 
 
 def memory_mib(quantity: str) -> int:
@@ -62,7 +72,13 @@ class JobSpec(BaseModel):
 
     entrypoint: str = Field(min_length=1, description="Shell command, run from the code directory")
     files: dict[str, str] = Field(default_factory=dict, description="filename -> file content")
-    workers: int = Field(default=2, ge=1, le=4)
+    workers: int = Field(default=2, ge=0, le=4, description="CPU workers")
+    gpus: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="gpu-sim workers: each holds 1 example.com/gpu, Ray resource {'sim_gpu': 1}",
+    )
     cpu: int = Field(default=1, ge=1, le=2, description="Ray CPUs (and CPU limit) per worker")
     # 1536Mi: a Ray Train worker with torch + transformers peaked at ~1.3GB (Phase 3)
     memory: str = Field(default="1536Mi", description="Memory limit per worker, e.g. 2Gi")
@@ -70,6 +86,12 @@ class JobSpec(BaseModel):
         default_factory=dict, description="Ray custom resources per worker, e.g. {'sim_gpu': 1}"
     )
     retries: int = Field(default=0, ge=0, le=5, description="RayJob backoffLimit")
+
+    @model_validator(mode="after")
+    def _check_has_workers(self) -> JobSpec:
+        if self.workers + self.gpus == 0:
+            raise ValueError("a job needs at least one worker: workers >= 1 or gpus >= 1")
+        return self
 
     @field_validator("files")
     @classmethod
@@ -101,7 +123,7 @@ class JobSpec(BaseModel):
     @classmethod
     def _check_resources(cls, resources: dict[str, float]) -> dict[str, float]:
         for name, amount in resources.items():
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in {"CPU", "GPU"}:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in {"CPU", "GPU", SIM_GPU}:
                 raise ValueError(f"bad custom resource name {name!r}")
             if amount <= 0:
                 raise ValueError(f"resource {name!r} must be > 0")

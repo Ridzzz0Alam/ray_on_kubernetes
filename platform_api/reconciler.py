@@ -17,6 +17,7 @@ log = logging.getLogger("rkp.reconciler")
 _DONE_DEPLOYMENT = {"Complete", "Failed", "ValidationFailed"}
 MAX_STORED_LOG_CHARS = 1_000_000
 MAX_MESSAGE_CHARS = 300
+UNSCHEDULABLE_PREFIX = "waiting for scheduling: "
 
 
 def _short(message: str | None) -> str | None:
@@ -118,10 +119,24 @@ def reconcile_once(registry: Registry, kube: KubeClient, admitter: Admitter | No
             obs = observe(rayjob)
             if obs.state in TERMINAL:
                 finalize(registry, kube, job, obs)
-            elif registry.transition(job.id, obs.state, obs.message, obs.started_at):
+                continue
+            message = obs.message
+            if obs.state == JobState.PENDING:
+                reason = kube.pending_reason(job.team, job.id)
+                if reason:  # e.g. Insufficient example.com/gpu: say why it's waiting
+                    message = f"{UNSCHEDULABLE_PREFIX}{reason}"
+            if registry.transition(job.id, obs.state, message, obs.started_at):
                 log.info(
                     "job state", extra={"job_id": job.id, "team": job.team, "state": obs.state}
                 )
+            elif message and message != job.message:
+                registry.set_message(job.id, message)
+            if (
+                obs.state != JobState.PENDING
+                and job.message
+                and job.message.startswith(UNSCHEDULABLE_PREFIX)
+            ):
+                registry.set_message(job.id, None)  # it got scheduled; the reason is stale
         except Exception:
             log.exception("reconcile failed", extra={"job_id": job.id})
     if admitter is not None:

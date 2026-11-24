@@ -42,7 +42,8 @@ def submit(
     args: Annotated[list[str] | None, typer.Argument(help="Script arguments (after --)")] = None,
     team: TeamOpt = None,
     script: Annotated[str, typer.Option(help="Entry script when PATH is a directory")] = "main.py",
-    workers: Annotated[int, typer.Option(min=1, max=4)] = 2,
+    workers: Annotated[int, typer.Option(min=0, max=4, help="CPU workers")] = 2,
+    gpus: Annotated[int, typer.Option(min=0, max=1, help="gpu-sim workers (1 sim GPU each)")] = 0,
     cpu: Annotated[int, typer.Option(min=1, max=2, help="CPUs per worker")] = 1,
     memory: Annotated[str, typer.Option(help="Memory per worker")] = "1536Mi",
     retries: Annotated[int, typer.Option(min=0, max=5)] = 0,
@@ -56,7 +57,9 @@ def submit(
         raise typer.Exit(2)
     entrypoint = shlex.join(["python", entry, *(args or [])])
     client = _client(team)
-    job = client.submit(entrypoint, files, workers=workers, cpu=cpu, memory=memory, retries=retries)
+    job = client.submit(
+        entrypoint, files, workers=workers, gpus=gpus, cpu=cpu, memory=memory, retries=retries
+    )
     typer.echo(job["id"])
     if wait:
         _follow(client, job["id"])

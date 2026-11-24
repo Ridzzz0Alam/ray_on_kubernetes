@@ -16,6 +16,7 @@ class FakeKube:
         self.logs: dict[tuple[str, str], str] = {}
         self.deleted: list[tuple[str, str]] = []
         self.quotas: dict[str, Resources] = {}  # namespace -> hard requests; none = unlimited
+        self.unschedulable: dict[str, str] = {}  # job id -> scheduler message
 
     def create_rayjob(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
         obj = {**body, "metadata": {**body["metadata"], "uid": str(uuid.uuid4())}}
@@ -54,6 +55,9 @@ class FakeKube:
 
     def get_quota(self, namespace: str) -> Resources | None:
         return self.quotas.get(namespace)
+
+    def pending_reason(self, namespace: str, job_id: str) -> str | None:
+        return self.unschedulable.get(job_id)
 
     # test helper: what the KubeRay operator would write
     def set_status(

@@ -6,7 +6,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from platform_api.models import REPLICA_CPUS, JobSpec, Resources, ServiceSpec, memory_mib
+from platform_api.models import (
+    GPU_RESOURCE,
+    REPLICA_CPUS,
+    SIM_GPU,
+    JobSpec,
+    Resources,
+    ServiceSpec,
+    memory_mib,
+)
 
 CODE_DIR = "/home/ray/rkp-code"
 # On the kind node, /shared is the repo's ./.shared (infra/kind/cluster.yaml).
@@ -69,6 +77,9 @@ def _container(
             "limits": {"cpu": cpu, "memory": f"{mem_mib}Mi"},
         },
     }
+    if request.gpu:  # extended resources can't be overcommitted: request == limit
+        c["resources"]["requests"][GPU_RESOURCE] = str(request.gpu)
+        c["resources"]["limits"][GPU_RESOURCE] = str(request.gpu)
     if mounts:
         c["volumeMounts"] = mounts
     if env:
@@ -85,11 +96,17 @@ def _worker_request(cpu: int, memory: str) -> Resources:
     return Resources(cpu * 500, memory_mib(memory) // 2)
 
 
+def _gpu_worker_request(cpu: int, memory: str) -> Resources:
+    return _worker_request(cpu, memory) + Resources(gpu=1)
+
+
 def job_requests(spec: JobSpec) -> Resources:
     """Everything the job's pods request together: what it counts against the team quota."""
     total = _head_request() + SUBMITTER_REQUEST
     for _ in range(spec.workers):
         total += _worker_request(spec.cpu, spec.memory)
+    for _ in range(spec.gpus):
+        total += _gpu_worker_request(spec.cpu, spec.memory)
     return total
 
 
@@ -133,6 +150,22 @@ def _ray_pod_storage(
     return volumes, mounts, env
 
 
+def _worker_group(
+    name: str, replicas: int, params: dict[str, str], container: dict, labels: dict, volumes: list
+) -> dict[str, Any]:
+    return {
+        "groupName": name,
+        "replicas": replicas,
+        "minReplicas": replicas,
+        "maxReplicas": replicas,
+        "rayStartParams": params,
+        "template": {
+            "metadata": {"labels": labels},
+            "spec": {"containers": [container], "volumes": volumes},
+        },
+    }
+
+
 def _ray_cluster(
     labels: dict[str, str],
     storage: tuple[list[dict], list[dict], list[dict]],
@@ -143,8 +176,13 @@ def _ray_cluster(
     resources: dict[str, float],
     image: str,
     ray_version: str,
+    gpus: int = 0,
 ) -> dict[str, Any]:
-    """RayCluster spec shared by RayJob (`rayClusterSpec`) and RayService (`rayClusterConfig`)."""
+    """RayCluster spec shared by RayJob (`rayClusterSpec`) and RayService (`rayClusterConfig`).
+
+    `gpus` adds a gpu-sim worker group: each pod requests one example.com/gpu from Kubernetes
+    (so the scheduler and team quotas count it) and starts Ray with {"sim_gpu": 1} (so Ray
+    places sim_gpu tasks and Train workers there)."""
     volumes, mounts, env = storage
     worker_params: dict[str, str] = {"num-cpus": str(cpu)}
     if resources:
@@ -153,9 +191,33 @@ def _ray_cluster(
     # TrainController. Ray's memory monitor killed jobs at 1.5Gi (Phase 2: hello) and at 2Gi
     # (Phase 3: a torch-importing driver + controller reached 1.91GB), so it gets 3Gi.
     head = _container("ray-head", image, "1", _head_request(), HEAD_MEMORY_MIB, mounts, env)
-    worker = _container(
-        "ray-worker", image, str(cpu), _worker_request(cpu, memory), memory_mib(memory), mounts, env
-    )
+    groups = []
+    if workers:
+        worker = _container(
+            "ray-worker",
+            image,
+            str(cpu),
+            _worker_request(cpu, memory),
+            memory_mib(memory),
+            mounts,
+            env,
+        )
+        groups.append(_worker_group("cpu", workers, worker_params, worker, labels, volumes))
+    if gpus:
+        gpu_worker = _container(
+            "ray-worker",
+            image,
+            str(cpu),
+            _gpu_worker_request(cpu, memory),
+            memory_mib(memory),
+            mounts,
+            env,
+        )
+        gpu_params = {
+            "num-cpus": str(cpu),
+            "resources": ray_resources_param({**resources, SIM_GPU: 1}),
+        }
+        groups.append(_worker_group("gpu-sim", gpus, gpu_params, gpu_worker, labels, volumes))
     return {
         "rayVersion": ray_version,
         "headGroupSpec": {
@@ -165,19 +227,7 @@ def _ray_cluster(
                 "spec": {"containers": [head], "volumes": volumes},
             },
         },
-        "workerGroupSpecs": [
-            {
-                "groupName": "cpu",
-                "replicas": workers,
-                "minReplicas": workers,
-                "maxReplicas": workers,
-                "rayStartParams": worker_params,
-                "template": {
-                    "metadata": {"labels": labels},
-                    "spec": {"containers": [worker], "volumes": volumes},
-                },
-            }
-        ],
+        "workerGroupSpecs": groups,
     }
 
 
@@ -199,6 +249,7 @@ def build_rayjob(
         resources=spec.resources,
         image=image,
         ray_version=ray_version,
+        gpus=spec.gpus,
     )
     return {
         "apiVersion": "ray.io/v1",

@@ -169,7 +169,7 @@ class Registry:
             )
         return cur.rowcount == 1
 
-    def set_message(self, job_id: str, message: str) -> None:
+    def set_message(self, job_id: str, message: str | None) -> None:
         with self._conn() as c:
             c.execute("UPDATE jobs SET message = ? WHERE id = ?", (message, job_id))
 

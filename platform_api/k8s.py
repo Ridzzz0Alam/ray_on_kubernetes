@@ -9,11 +9,10 @@ from kubernetes.client.exceptions import ApiException
 from kubernetes.utils import parse_quantity
 
 from platform_api.manifests import SUBMITTER_CONTAINER
-from platform_api.models import Resources
+from platform_api.models import GPU_RESOURCE, UNBOUNDED, Resources
 
 GROUP, VERSION, PLURAL = "ray.io", "v1", "rayjobs"
 SERVICES = "rayservices"
-UNBOUNDED = 10**9  # a quota that doesn't set requests.cpu / requests.memory
 
 
 class KubeError(Exception):
@@ -42,6 +41,10 @@ class KubeClient(Protocol):
     def job_logs(self, namespace: str, name: str, tail_lines: int | None = None) -> str | None:
         """Logs of the newest submitter pod, which tails the Ray driver. None if no pod yet."""
 
+    def pending_reason(self, namespace: str, job_id: str) -> str | None:
+        """Why one of the job's pods can't be scheduled (the scheduler's PodScheduled=False
+        message, e.g. "0/1 nodes are available: 1 Insufficient example.com/gpu."), or None."""
+
     def get_quota(self, namespace: str) -> Resources | None:
         """The namespace's hard requests.cpu / requests.memory (tightest across its
         ResourceQuotas), or None when it has no quota."""
@@ -50,16 +53,17 @@ class KubeClient(Protocol):
 def quota_from_hard(hards: list[dict[str, str]]) -> Resources | None:
     if not hards:
         return None
-    cpu = min(
-        (parse_quantity(h["requests.cpu"]) for h in hards if "requests.cpu" in h), default=None
-    )
-    mem = min(
-        (parse_quantity(h["requests.memory"]) for h in hards if "requests.memory" in h),
-        default=None,
-    )
+
+    def tightest(key: str) -> float | None:
+        values = [parse_quantity(h[key]) for h in hards if key in h]
+        return min(values) if values else None
+
+    cpu, mem = tightest("requests.cpu"), tightest("requests.memory")
+    gpu = tightest(f"requests.{GPU_RESOURCE}")
     return Resources(
         UNBOUNDED if cpu is None else int(cpu * 1000),
         UNBOUNDED if mem is None else int(mem / 2**20),
+        UNBOUNDED if gpu is None else int(gpu),
     )
 
 
@@ -148,3 +152,16 @@ class RealKube:
         except ApiException as e:
             raise self._wrap(e) from e
         return quota_from_hard([q.spec.hard or {} for q in quotas.items if q.spec])
+
+    def pending_reason(self, namespace: str, job_id: str) -> str | None:
+        try:
+            pods = self._core.list_namespaced_pod(
+                namespace, label_selector=f"rkp.io/job-id={job_id}"
+            )
+        except ApiException as e:
+            raise self._wrap(e) from e
+        for pod in pods.items:
+            for cond in (pod.status and pod.status.conditions) or []:
+                if cond.type == "PodScheduled" and cond.status == "False" and cond.message:
+                    return cond.message.strip().splitlines()[0]
+        return None

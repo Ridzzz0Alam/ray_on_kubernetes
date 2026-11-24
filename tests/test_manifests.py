@@ -80,8 +80,8 @@ def test_shared_data_is_read_only_and_checkpoints_are_per_team() -> None:
 
 
 def test_custom_resources_are_shell_quoted_json() -> None:
-    group = build(resources={"sim_gpu": 1})["spec"]["rayClusterSpec"]["workerGroupSpecs"][0]
-    assert group["rayStartParams"]["resources"] == '"{\\"sim_gpu\\": 1}"'
+    group = build(resources={"accel": 1})["spec"]["rayClusterSpec"]["workerGroupSpecs"][0]
+    assert group["rayStartParams"]["resources"] == '"{\\"accel\\": 1}"'
     assert ray_resources_param({"b": 2, "a": 1}) == '"{\\"a\\": 1, \\"b\\": 2}"'
 
 

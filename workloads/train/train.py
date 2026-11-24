@@ -116,6 +116,11 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--sim-gpu",
+        action="store_true",
+        help='each Train worker also requests {"sim_gpu": 1} (submit with gpus=1)',
+    )
     args = ap.parse_args()
 
     profile = PROFILES[args.profile]
@@ -131,7 +136,9 @@ def main() -> None:
         train_loop,
         train_loop_config={"profile": args.profile, "epochs": args.epochs, "seed": args.seed},
         scaling_config=ScalingConfig(
-            num_workers=args.workers, use_gpu=False, resources_per_worker={"CPU": 1}
+            num_workers=args.workers,
+            use_gpu=False,  # simulated GPU: placement by the sim_gpu resource, torch on CPU
+            resources_per_worker={"CPU": 1, **({"sim_gpu": 1} if args.sim_gpu else {})},
         ),
         run_config=RunConfig(
             name=name,

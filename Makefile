@@ -15,7 +15,7 @@ METRICS_PORT := 9108
 # queried on every make call. The API's metrics listener binds it so Prometheus can scrape the host.
 KIND_GATEWAY = $(shell docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' | head -1)
 
-.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api data monitoring monitoring-down grafana
+.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api data monitoring monitoring-down grafana gpu-sim
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -74,6 +74,19 @@ hello: ## Phase 1 smoke test: run the hello RayJob and wait for SUCCEEDED
 teams: ## Team namespaces + quotas + LimitRanges + API RBAC, and their checkpoint dirs
 	mkdir -p .shared/data $(addprefix .shared/checkpoints/,$(TEAMS))
 	kubectl --context $(KUBECTX) apply -f infra/k8s/teams/
+	$(MAKE) --no-print-directory gpu-sim
+
+SIM_GPUS ?= 1
+gpu-sim: ## Advertise SIM_GPUS fake GPUs (extended resource example.com/gpu) on the kind node
+	@# What a GPU device plugin would do: put the device count in the node's capacity. Pods then
+	@# request example.com/gpu like nvidia.com/gpu, and the scheduler and quotas count it.
+	kubectl --context $(KUBECTX) patch node $(CLUSTER)-control-plane --subresource=status --type=json \
+		-p '[{"op": "add", "path": "/status/capacity/example.com~1gpu", "value": "$(SIM_GPUS)"}]'
+	@# The kubelet copies capacity into allocatable on its next status sync (~10-30s): wait for it.
+	@timeout 90 bash -c 'until [ -n "$$(kubectl --context $(KUBECTX) get node $(CLUSTER)-control-plane \
+		-o jsonpath="{.status.allocatable.example\.com/gpu}")" ]; do sleep 3; done'
+	@kubectl --context $(KUBECTX) get node $(CLUSTER)-control-plane \
+		-o jsonpath='allocatable example.com/gpu: {.status.allocatable.example\.com/gpu}{"\n"}'
 
 data: ## Download + tokenize the training data/model once into .shared/data (PROFILE=tiny|distilbert)
 	mkdir -p .shared/data

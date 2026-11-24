@@ -6,9 +6,9 @@ import yaml
 from kubernetes.utils import parse_quantity
 
 from platform_api.config import ROOT
-from platform_api.k8s import UNBOUNDED, quota_from_hard
+from platform_api.k8s import quota_from_hard
 from platform_api.manifests import build_rayjob, job_requests
-from platform_api.models import JobSpec, Resources, memory_mib
+from platform_api.models import UNBOUNDED, JobSpec, Resources, memory_mib
 from platform_api.reconciler import reconcile_once
 from tests.conftest import KEY_A, KEY_B, Platform
 
@@ -119,8 +119,11 @@ def test_quota_parsing_takes_the_tightest_and_ignores_unset_keys() -> None:
     q = quota_from_hard(
         [{"requests.cpu": "2", "requests.memory": "4Gi"}, {"requests.cpu": "1500m"}]
     )
-    assert q == Resources(1500, 4096)
-    assert quota_from_hard([{"count/pods": "5"}]) == Resources(UNBOUNDED, UNBOUNDED)
+    assert q == Resources(1500, 4096, UNBOUNDED)
+    assert quota_from_hard([{"count/pods": "5"}]) == Resources(UNBOUNDED, UNBOUNDED, UNBOUNDED)
+    assert quota_from_hard([{"requests.example.com/gpu": "1"}]) == Resources(
+        UNBOUNDED, UNBOUNDED, 1
+    )
 
 
 def test_team_quotas_fit_one_training_job_but_not_two_small_ones() -> None:
@@ -139,4 +142,7 @@ def test_team_quotas_fit_one_training_job_but_not_two_small_ones() -> None:
         assert training.fits_in(quota)
         assert not (small + small).fits_in(quota)
         total += quota
-    assert total.fits_in(Resources(cpu_m=4000, mem_mib=15 * 1024))  # sum of quotas <= the node
+    # CPU and memory quotas sum to no more than the node. GPUs are deliberately overcommitted:
+    # each team may hold the node's one sim GPU, so cross-team contention shows up as Pending.
+    assert total.cpu_m <= 4000 and total.mem_mib <= 15 * 1024
+    assert all(quota_from_hard([h]).gpu == 1 for h in hards.values())  # type: ignore[union-attr]
