@@ -1,4 +1,4 @@
-# One namespace per team. Quotas and LimitRanges are added in Phase 6.
+# One namespace per team. Quotas + LimitRanges: quotas.yaml. API rights: rbac.yaml.
 apiVersion: v1
 kind: Namespace
 metadata:

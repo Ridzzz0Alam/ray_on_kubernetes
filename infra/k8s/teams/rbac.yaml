@@ -1,0 +1,48 @@
+# What the platform API may do, when it runs in-cluster as rkp-system/rkp-api.
+# The ClusterRole is only bound inside team namespaces (RoleBindings), so the API has no rights
+# anywhere else: not in kube-system, not cluster-wide, and nothing beyond these verbs.
+# In dev the API runs on the host with your kubeconfig; `make test-k8s` checks these rights.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rkp-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rkp-api
+  namespace: rkp-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rkp-api
+rules:
+  - apiGroups: [ray.io]
+    resources: [rayjobs, rayservices]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [configmaps]  # the job's code, owned by its RayJob
+    verbs: [get, create, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]  # driver logs from the submitter pod
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [resourcequotas]  # admission reads the team's quota
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rkp-api
+  namespace: team-a
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rkp-api}
+subjects: [{kind: ServiceAccount, name: rkp-api, namespace: rkp-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rkp-api
+  namespace: team-b
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rkp-api}
+subjects: [{kind: ServiceAccount, name: rkp-api, namespace: rkp-system}]

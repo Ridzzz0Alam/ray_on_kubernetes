@@ -65,7 +65,7 @@ hello: ## Phase 1 smoke test: run the hello RayJob and wait for SUCCEEDED
 	kubectl --context $(KUBECTX) wait rayjob/hello --for=jsonpath='{.status.jobStatus}'=SUCCEEDED --timeout=10m
 	kubectl --context $(KUBECTX) logs -l job-name=hello --tail=20
 
-teams: ## Create the team namespaces + their checkpoint dirs (quotas come in Phase 6)
+teams: ## Team namespaces + quotas + LimitRanges + API RBAC, and their checkpoint dirs
 	mkdir -p .shared/data $(addprefix .shared/checkpoints/,$(TEAMS))
 	kubectl --context $(KUBECTX) apply -f infra/k8s/teams/
 
