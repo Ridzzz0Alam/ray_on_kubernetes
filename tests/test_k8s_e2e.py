@@ -1,10 +1,14 @@
-"""End-to-end against the kind cluster: `make up && make teams && make test-k8s` (~2 min).
+"""End-to-end against the kind cluster: `make up && make teams && make test-k8s`.
+
+The training tests need `make image` and `make data` too, and take most of the ~10 min.
 
 The API runs in-process with the real Kubernetes client; reconcile_once is driven by the test.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,10 +20,17 @@ from platform_api.config import ROOT, Settings, read_env_file
 from platform_api.k8s import RealKube
 from platform_api.main import create_app
 from platform_api.reconciler import reconcile_once
+from sdk.client import load_code
 
 pytestmark = pytest.mark.k8s
 KEY = "e2e-team-a-key-0123456789"
 HELLO = (ROOT / "workloads" / "hello.py").read_text()
+TRAIN = {
+    "entrypoint": "python train.py --profile tiny --epochs 2",
+    "files": load_code(ROOT / "workloads" / "train"),
+}
+CHECKPOINTS = ROOT / ".shared" / "checkpoints" / "team-a"
+DONE = {"SUCCEEDED", "FAILED", "CANCELLED"}
 
 
 @pytest.fixture
@@ -57,6 +68,16 @@ def gone(kube: RealKube, name: str, timeout: float = 60) -> bool:
     return True
 
 
+def pods_gone(kube: RealKube, job_id: str, timeout: float = 90) -> bool:
+    """No pod at all (head, worker or submitter) is left for the job."""
+    deadline = time.monotonic() + timeout
+    while kube._core.list_namespaced_pod("team-a", label_selector=f"rkp.io/job-id={job_id}").items:
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(3)
+    return True
+
+
 def test_hello_succeeds_with_driver_logs_and_cleanup(api: tuple[TestClient, RealKube]) -> None:
     http, kube = api
     r = http.post("/jobs", json={"entrypoint": "python hello.py", "files": {"hello.py": HELLO}})
@@ -78,3 +99,67 @@ def test_cancel_running_job(api: tuple[TestClient, RealKube]) -> None:
     job = wait_for(http, r.json()["id"], {"RUNNING"})
     assert http.delete(f"/jobs/{job['id']}").json()["state"] == "CANCELLED"
     assert gone(kube, job["k8s_name"])
+
+
+def test_training_survives_worker_kill_and_resumes(api: tuple[TestClient, RealKube]) -> None:
+    """Phase 4: a worker dies during epoch 2; Ray Train restarts the group from epoch 1."""
+    http, kube = api
+    r = http.post("/jobs", json=TRAIN)
+    assert r.status_code == 201, r.text
+    job_id = r.json()["id"]
+    chaos = subprocess.Popen(
+        ["bash", str(ROOT / "scripts" / "chaos_kill_worker.sh"), "team-a", job_id, "600"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        job = wait_for(http, job_id, DONE, timeout=900)
+        out = chaos.communicate(timeout=30)[0]
+        assert chaos.returncode == 0, out
+        assert "killed worker pod" in out
+        assert job["state"] == "SUCCEEDED", job["message"]
+        logs = http.get(f"/jobs/{job_id}/logs").text
+        assert "resumed from checkpoint at epoch 1" in logs
+        assert "'epoch': 2" in logs
+        # checkpoint_<timestamp>/ dirs (not Ray's checkpoint_manager_snapshot.json)
+        kept = [p for p in (CHECKPOINTS / job_id).glob("checkpoint_*") if p.is_dir()]
+        assert 1 <= len(kept) <= 2  # CheckpointConfig(num_to_keep=2)
+        assert pods_gone(kube, job_id)
+    finally:
+        chaos.kill()
+        shutil.rmtree(CHECKPOINTS / job_id, ignore_errors=True)
+
+
+def test_always_failing_job_is_retried_then_failed(api: tuple[TestClient, RealKube]) -> None:
+    http, kube = api
+    r = http.post(
+        "/jobs",
+        json={
+            "entrypoint": "python fail.py",
+            "files": {"fail.py": "raise SystemExit('boom')\n"},
+            "workers": 1,
+            "memory": "512Mi",
+            "retries": 2,
+        },
+    )
+    job = wait_for(http, r.json()["id"], DONE, timeout=600)
+    assert job["state"] == "FAILED"
+    assert job["message"].startswith("failed after 3 attempts"), job["message"]
+    assert pods_gone(kube, job["id"])
+
+
+def test_cancel_during_training_leaves_no_pods(api: tuple[TestClient, RealKube]) -> None:
+    http, kube = api
+    r = http.post("/jobs", json=TRAIN)
+    job_id = r.json()["id"]
+    try:
+        wait_for(http, job_id, {"RUNNING"})
+        deadline = time.monotonic() + 180  # cancel once the workers are actually training
+        while "[rank 0]" not in (kube.job_logs("team-a", f"rkp-{job_id}") or ""):
+            assert time.monotonic() < deadline, "training never started"
+            time.sleep(3)
+        assert http.delete(f"/jobs/{job_id}").json()["state"] == "CANCELLED"
+        assert pods_gone(kube, job_id)
+    finally:
+        shutil.rmtree(CHECKPOINTS / job_id, ignore_errors=True)

@@ -49,6 +49,8 @@ def observe(rayjob: dict[str, Any]) -> Observation:
     message = _short(status.get("message"))
     info = status.get("rayJobInfo") or {}
     started, finished = _time(info.get("startTime")), _time(info.get("endTime"))
+    # With backoffLimit, KubeRay counts failed attempts in status.failed (each one a fresh cluster).
+    failed_attempts = int(status.get("failed") or 0)
     if deployment in _DONE_DEPLOYMENT:
         if ray_status == "SUCCEEDED":
             state = JobState.SUCCEEDED
@@ -56,9 +58,12 @@ def observe(rayjob: dict[str, Any]) -> Observation:
             state = JobState.CANCELLED
         else:
             state, message = JobState.FAILED, message or _short(status.get("reason"))
+            if failed_attempts > 1:
+                message = f"failed after {failed_attempts} attempts: {message or 'unknown error'}"
         return Observation(state, message, started, finished or _time(status.get("endTime")))
     if deployment == "Retrying":
-        return Observation(JobState.RETRYING, message)
+        allowed = int((rayjob.get("spec") or {}).get("backoffLimit") or 0) + 1
+        return Observation(JobState.RETRYING, f"attempt {failed_attempts} of {allowed} failed")
     # Ray reports the job done a few seconds before KubeRay marks the deployment Complete;
     # until then it's still RUNNING (not back to PENDING).
     if ray_status in {"RUNNING", "SUCCEEDED", "FAILED", "STOPPED"}:

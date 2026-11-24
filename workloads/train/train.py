@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
 import time
 from typing import Any
 
 import ray.train
 import ray.train.torch
 from profiles import PROFILES
-from ray.train import RunConfig, ScalingConfig
+from ray.train import CheckpointConfig, FailureConfig, RunConfig, ScalingConfig
 from ray.train.torch import TorchTrainer
 
 
@@ -42,11 +43,26 @@ def train_loop(config: dict[str, Any]) -> None:
     train_dl, eval_dl = loader("train", True), loader("eval", False)
     model = AutoModelForSequenceClassification.from_pretrained(profile.model_dir, num_labels=2)
     model = ray.train.torch.prepare_model(model)  # wraps in DDP
+    unwrapped = model.module if hasattr(model, "module") else model  # what gets checkpointed
     optim = torch.optim.AdamW(model.parameters(), lr=profile.lr, weight_decay=0.01)
     total_steps = config["epochs"] * len(train_dl)
     sched = torch.optim.lr_scheduler.LambdaLR(optim, lambda s: max(0.0, 1 - s / total_steps))
 
-    for epoch in range(1, config["epochs"] + 1):
+    # A restarted worker group (FailureConfig) or a relaunched driver (RayJob backoffLimit, same
+    # RunConfig name) both get the latest reported checkpoint here.
+    start_epoch = 1
+    ckpt = ray.train.get_checkpoint()
+    if ckpt:
+        with ckpt.as_directory() as d:
+            state = torch.load(os.path.join(d, "state.pt"), weights_only=False)
+        unwrapped.load_state_dict(state["model"])
+        optim.load_state_dict(state["optim"])
+        sched.load_state_dict(state["sched"])
+        start_epoch = state["epoch"] + 1
+        if rank == 0:
+            print(f"[rank 0] resumed from checkpoint at epoch {state['epoch']}", flush=True)
+
+    for epoch in range(start_epoch, config["epochs"] + 1):
         t0 = time.monotonic()
         if hasattr(train_dl.sampler, "set_epoch"):
             train_dl.sampler.set_epoch(epoch)
@@ -79,9 +95,19 @@ def train_loop(config: dict[str, Any]) -> None:
             "eval_accuracy": round(float(stats[3] / stats[4]), 4),
             "epoch_seconds": round(time.monotonic() - t0, 1),
         }
-        if rank == 0:
-            print(f"[rank 0] {metrics}", flush=True)
-        ray.train.report(metrics)
+        if rank != 0:
+            ray.train.report(metrics)  # every worker must call report; only rank 0 saves
+            continue
+        print(f"[rank 0] {metrics}", flush=True)
+        with tempfile.TemporaryDirectory() as d:
+            state = {
+                "model": unwrapped.state_dict(),
+                "optim": optim.state_dict(),
+                "sched": sched.state_dict(),
+                "epoch": epoch,
+            }
+            torch.save(state, os.path.join(d, "state.pt"))
+            ray.train.report(metrics, checkpoint=ray.train.Checkpoint.from_directory(d))
 
 
 def main() -> None:
@@ -107,12 +133,17 @@ def main() -> None:
         scaling_config=ScalingConfig(
             num_workers=args.workers, use_gpu=False, resources_per_worker={"CPU": 1}
         ),
-        run_config=RunConfig(name=name, storage_path=storage),
+        run_config=RunConfig(
+            name=name,
+            storage_path=storage,
+            checkpoint_config=CheckpointConfig(num_to_keep=2),
+            failure_config=FailureConfig(max_failures=3),  # worker/node loss: restart the group
+        ),
     )
     t0 = time.monotonic()
     result = trainer.fit()
-    if result.metrics:  # Train V2 fills this from the latest checkpoint (Phase 4)
-        print(f"final metrics: {result.metrics}")
+    print(f"final metrics: {result.metrics}")
+    print(f"checkpoint: {result.checkpoint.path if result.checkpoint else None}")
     print(f"training wall time: {time.monotonic() - t0:.0f}s")
 
 

@@ -136,3 +136,25 @@ def test_long_kuberay_message_is_shortened_to_its_first_line() -> None:
     assert obs.message == "Unexpected error: worker killed (OOM)"
     obs = observe({"status": {"jobDeploymentStatus": "Failed", "message": "x" * 1000}})
     assert obs.message is not None and len(obs.message) == 300
+
+
+def test_observe_reports_retry_attempts() -> None:
+    retrying = observe(
+        {"spec": {"backoffLimit": 2}, "status": {"jobDeploymentStatus": "Retrying", "failed": 1}}
+    )
+    assert (retrying.state, retrying.message) == (JobState.RETRYING, "attempt 1 of 3 failed")
+    failed = observe(
+        {
+            "spec": {"backoffLimit": 2},
+            "status": {
+                "jobDeploymentStatus": "Failed",
+                "jobStatus": "FAILED",
+                "failed": 3,
+                "message": "Job entrypoint command failed with exit code 1",
+            },
+        }
+    )
+    assert failed.state == JobState.FAILED
+    assert failed.message == (
+        "failed after 3 attempts: Job entrypoint command failed with exit code 1"
+    )
