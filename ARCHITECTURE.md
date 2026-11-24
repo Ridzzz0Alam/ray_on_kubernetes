@@ -135,16 +135,24 @@ The node has about 4 vCPU and 15 GB. The stack target is **≤ 3 CPU requested a
 | platform_api (host) | – | ~150 MB | uvicorn, outside the cluster |
 | **Total (one training job + monitoring)** | **~3.1** | **~8.5 GB** | Sum of limits, which are ceilings. Measured: **6.9 GiB for `tiny` training with no monitoring**, already near the 7 GB target. Phase 7 must keep monitoring small or turn it on only for demos |
 
-Rules: one RayCluster at a time, except in the multi-tenancy demo, which uses 1 worker per team.
+Rules: one RayCluster at a time, except in the multi-tenancy and GPU demos, which use small 1-worker clusters.
+Monitoring off during training (7.01 GiB with it on). The GPU demo's three small clusters peaked at 7.65 GiB even with monitoring off:
+over budget, and an open item (slim the Ray head).
 Turn monitoring off when you don't need it (`make monitoring-down`).
 
 ## 7. GPU awareness
 
-- **Locally:** a Ray custom resource. A `gpu-sim` worker group starts with
-  `rayStartParams.resources: '"{\"sim_gpu\": 1}"'`, and jobs request `resources_per_worker={"sim_gpu": 1}`.
-  This exercises the scheduling path (placement, pending when it's busy) with no hardware.
-  It can also be done at the K8s layer by patching the node's capacity with `example.com/gpu`, so quotas count "GPUs".
-- **Cloud (optional):** the same RayJob with `num_gpus=1` on a short-lived spot GPU node pool, created and deleted by script.
+- **Locally (simulated):** the node advertises an extended resource, `example.com/gpu: 1` (`make gpu-sim`, called by
+  `make teams`; it patches node capacity the way a device plugin would). `JobSpec.gpus: 1` adds a `gpu-sim` worker
+  group whose pods request and limit `example.com/gpu: 1` and start Ray with `{"sim_gpu": 1}`. Scripts ask for it with
+  `resources={"sim_gpu": 1}` (tasks) or `resources_per_worker={"CPU": 1, "sim_gpu": 1}` (Ray Train, `train.py --sim-gpu`).
+- **Who waits where:** each team's quota has `requests.example.com/gpu: 1`, and `Resources.gpu` is part of whole-job
+  admission, so a team's 2nd GPU job is QUEUED in the API. Across teams, GPUs are overcommitted (2 quotas, 1 node GPU):
+  both jobs are admitted and the scheduler keeps the second gpu-sim pod `Pending: Insufficient example.com/gpu`.
+  KubeRay waits for every pod before submitting, so the job stays PENDING, and the reconciler shows the scheduler's
+  reason in the job message. CPU jobs are unaffected. Demo: `docs/demos/gpu-awareness.md`.
+- **Cloud (optional, not done):** the same job with `nvidia.com/gpu` and Ray's `GPU` resource on a short-lived GPU
+  node pool, created and deleted by script. Needs owner approval at the time (AGENTS.md §4).
 
 ## 8. Observability
 

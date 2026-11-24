@@ -175,9 +175,11 @@ queue time stepping 34s → 141s → 246s while team-b's stays at 33s ([recorded
 **Cost report** (`rkp cost --since 7d`): pod requests × time held (job: driver start → finish; service: create →
 delete), × rates from `config/rates.yaml`. The arithmetic is unit-tested against registry rows.
 
-**GPU awareness:** a `gpu-sim` worker group advertises the Ray custom resource `sim_gpu`. Jobs that request it
-wait for that group's capacity, while CPU jobs keep running. This exercises the scheduling logic with no hardware.
-An optional run on a short-lived cloud GPU node uses the same job spec with `num_gpus=1`.
+**GPU awareness ✅:** no GPU on the laptop, so the node advertises a simulated one (`example.com/gpu: 1`, like a
+device plugin would) and `JobSpec.gpus: 1` adds a `gpu-sim` worker that holds it and starts Ray with `{"sim_gpu": 1}`.
+Measured: team-b's GPU job waited **150s** Pending (`Insufficient example.com/gpu`, shown in `rkp status`) while
+team-a held the GPU, and team-b's CPU job finished in 36s meanwhile ([recorded run with screenshots](docs/demos/gpu-awareness.md)).
+A real cloud GPU run would need owner approval and wasn't done.
 
 ## 9. Key decisions and trade-offs
 
@@ -278,5 +280,5 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 | 0 Bootstrap | ✅ | 5 Ray Serve | ✅ |
 | 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | ✅ |
 | 2 API + SDK | ✅ | 7 Observability + cost | ✅ |
-| 3 Distributed training | ✅ | 8 GPU awareness | 🚧 |
+| 3 Distributed training | ✅ | 8 GPU awareness | ✅ |
 | 4 Lifecycle | ✅ | 9 Polish + full case study | 🚧 |

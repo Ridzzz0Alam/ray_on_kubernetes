@@ -48,13 +48,13 @@ team-b  33 33 33 33  33  33  33  33  33  33
 `rkp_job_oldest_waiting_seconds` for team-a climbed `0 14 43 73 103 133 163 193 223` while its jobs queued, then dropped to 0.
 team-b's only went above zero for its own 12s start-up.
 
-![Queueing panels](img/dashboard-queueing.jpg)
+![Queueing panels](../screenshots/phase-7/grafana-noisy-neighbour-queueing.jpg)
 
 "Queue time of the last started job": **team-a (green) steps up to about 4 min while team-b (yellow) stays flat at about 33s.**
 "Oldest job still waiting" shows team-a's queue building and draining. "Unfinished jobs by state" shows team-a's 3
 jobs, 2 of them QUEUED, while team-b's single job runs.
 
-![Quota and Ray panels](img/dashboard-quota-ray.jpg)
+![Quota and Ray panels](../screenshots/phase-7/grafana-noisy-neighbour-quota-ray.jpg)
 
 The quota panels show each team at one 1-worker job's worth of requests (0.8 CPU / 2.45 GiB) during the demo. The later
 team-a block is a 2-epoch training job, then a served model.

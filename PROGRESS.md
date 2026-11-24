@@ -6,6 +6,42 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-24: Phase 8 complete (GPU awareness, simulated). Session paused here
+
+**Done**
+- Simulated GPU: `make gpu-sim` (called by `make teams`) patches the node's capacity to `example.com/gpu: 1` and waits for allocatable.
+  `JobSpec.gpus` (0–1) adds a `gpu-sim` worker group (requests and limits `example.com/gpu: 1`, Ray `{"sim_gpu": 1}`). `workers` may now be 0.
+  `sim_gpu` is reserved in `resources`.
+- Team quotas gain `requests.example.com/gpu: "1"`. `Resources.gpu` is part of admission: a team's 2nd GPU job is QUEUED in the API, and across
+  teams the scheduler holds the second gpu-sim pod Pending.
+- The reconciler puts the scheduler's PodScheduled=False message on PENDING jobs (`waiting for scheduling: … Insufficient example.com/gpu`)
+  and clears it once the job runs.
+- `workloads/gpu_sim.py`, `train.py --sim-gpu`, `rkp submit --gpus`, `scripts/gpu_contention.sh`, a Grafana "Simulated GPUs: used vs quota" panel,
+  and `docs/demos/gpu-awareness.md`.
+- **Screenshots now live in `docs/screenshots/phase-N/`.** Phase 7's were moved there, and Phase 8 adds 4 (2 Grafana, 2 Ray dashboard).
+  The owner is writing a report later: keep capturing per phase.
+- Tests: 102 unit tests and **17/17 `make test-k8s`** (16m27s), including the new GPU contention test.
+
+**Measured:** team-b's GPU job waited 150s Pending while team-a held the GPU, and team-b's CPU job finished in 36s meanwhile. Sim-GPU training
+(1 epoch, 1 worker on gpu-sim) reached 84.6%. The cloud GPU run was **not done** (needs owner approval).
+
+**State:** everything is pushed. The cluster is deleted and nothing is running. `.shared/` keeps the data and checkpoints (git-ignored).
+
+**Open items for next session**
+1. **Memory over budget in the GPU scenario:** 3 small Ray clusters at once peaked at **7.65 GiB with monitoring off** (the `make test-k8s` GPU test).
+   Options: slim the Ray head for non-training jobs, or restructure the test/demo so only 2 clusters overlap.
+2. Quota hand-over gap (from Phase 7): count a finished job until its pods are gone.
+3. Then **Phase 9** (polish: README quickstart, architecture diagram, screenshots, results table, `rkp serve` CLI).
+
+**Gotchas**
+- A Ray worker node's own processes use ~0.45 GB. At 512Mi a task-running worker gets OOM-killed by Ray's memory monitor in a retry loop, and the job
+  shows RUNNING forever. Use ≥640Mi for workers that run tasks.
+- Node allocatable for a patched extended resource appears only on the kubelet's next status sync (10–30s). `make gpu-sim` waits for it.
+- Agreed with the owner: **monitoring off during training** (and the GPU demo).
+- `pgrep -f`/`pkill -f` from an agent shell match the shell itself (exit 144). Kill by PID from a separate `pgrep -af` listing.
+
+---
+
 ## 2026-11-24: Phase 7 complete (observability + cost)
 
 **Done**

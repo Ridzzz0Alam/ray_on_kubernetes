@@ -132,14 +132,14 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 - [x] After the Phase 6 demo, the dashboard shows team-a's queue time going up and team-b's staying flat
 - [x] Cost report numbers are unit-tested against the registry
 
-## Phase 8: GPU awareness (Sun evening)
+## Phase 8: GPU awareness (Sun evening) ✅
 
-- [ ] Ray custom resource `{"sim_gpu": 1}` on a dedicated worker group, requested by the job with `resources_per_worker`
-- [ ] (Optional) The node extended resource `example.com/gpu`, so quotas limit "GPUs" per team
-- [ ] (Optional, about $2–5, **owner approval required at the time**) Same job on a short-lived cloud GPU node, with teardown in the same session
+- [x] Ray custom resource `{"sim_gpu": 1}` on a dedicated worker group, requested by the job with `resources_per_worker`
+- [x] (Optional) The node extended resource `example.com/gpu`, so quotas limit "GPUs" per team
+- [ ] (Optional, **not done**: about $2–5, owner approval required at the time) Same job on a short-lived cloud GPU node, with teardown in the same session
 
 **Acceptance**
-- [ ] A sim_gpu job stays Pending until GPU-sim capacity frees up, and CPU jobs aren't blocked by it
+- [x] A sim_gpu job stays Pending until GPU-sim capacity frees up, and CPU jobs aren't blocked by it
 
 ## Phase 9: Polish (Sun evening)
 
@@ -202,3 +202,7 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-24 | Monitoring images are saved for the local platform only (`docker save --platform`) and loaded with `kind load image-archive`, with `pullPolicy: Never` | `kind load docker-image` imports `--all-platforms` and fails on multi-arch images under Docker's containerd image store. Without `Never` the node silently pulled the image at pod start |
 | 2026-11-24 | Grafana limit 256Mi → 384Mi, with unified alerting and plugin pre-install off | Grafana 13 was OOM-killed at 256Mi during start-up. It idles at about 236 MB |
 | 2026-11-24 | Cost = pod requests × time held (job: driver start → finish; service: create → delete), clipped to the window | It bills what a team reserves against its quota. Queued jobs hold nothing. Cluster start-up before driver start (~35s) isn't billed, because the registry has no admitted-at time |
+| 2026-11-24 | Simulated GPU = node extended resource `example.com/gpu` (scheduler + quota) **and** Ray resource `sim_gpu` on a dedicated `gpu-sim` worker group, via `JobSpec.gpus` | Each job has its own RayCluster, so a Ray-only resource would never contend between jobs. Contention has to happen where real GPUs contend: in the K8s scheduler. `sim_gpu` keeps Ray placement honest |
+| 2026-11-24 | GPU quota 1 per team, node capacity 1: overcommitted across teams on purpose | Within a team the API queues the 2nd GPU job. Across teams both are admitted and the scheduler serializes them (Pending), which is the acceptance scenario and how a shared GPU pool behaves |
+| 2026-11-24 | The reconciler copies the scheduler's `PodScheduled=False` message into the job while PENDING, and clears it once the job runs | "Why is my job pending?" answered in `rkp status` without kubectl |
+| 2026-11-24 | Demo worker sizes: 640Mi GPU workers, 512Mi CPU worker | A Ray worker node's own processes use ~0.45 GB. At 512Mi a task-running worker was OOM-killed in a loop by Ray's memory monitor. The sizes fit two jobs in team-b's 4Gi quota (2056 + 1992Mi) |
