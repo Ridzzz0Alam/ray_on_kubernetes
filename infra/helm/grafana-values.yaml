@@ -1,0 +1,47 @@
+# grafana-community/grafana, chart version GRAFANA_CHART_VERSION in infra/versions.env.
+# One Prometheus datasource and the rkp dashboard (dashboards/rkp.json, added with --set-file by
+# `make monitoring`). Local dev only: anonymous viewers, no persistence.
+image:
+  pullPolicy: Never # kind-loaded by `make monitoring`; never pulled at pod start
+# Grafana 13 was OOM-killed at 256Mi during start-up; alerting and plugin pre-install are off below.
+resources:
+  requests: {cpu: 25m, memory: 160Mi}
+  limits: {cpu: 500m, memory: 384Mi}
+persistence:
+  enabled: false
+testFramework:
+  enabled: false
+grafana.ini:
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+    check_for_plugin_updates: false
+  news:
+    news_feed_enabled: false
+  unified_alerting:
+    enabled: false # no alerting in this build
+  plugins:
+    preinstall_disabled: true # no plugin downloads at start-up; only the core Prometheus datasource is used
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        url: http://prometheus-server.monitoring.svc
+        access: proxy
+        isDefault: true
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: rkp
+        folder: rkp
+        type: file
+        disableDeletion: true
+        options:
+          path: /var/lib/grafana/dashboards/rkp

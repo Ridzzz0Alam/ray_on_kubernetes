@@ -10,6 +10,8 @@ REQUIRED = {
     "HELM_VERSION",
     "KIND_NODE_IMAGE",
     "KUBERAY_CHART_VERSION",
+    "PROMETHEUS_CHART_VERSION",
+    "GRAFANA_CHART_VERSION",
     "RAY_VERSION",
     "RAY_IMAGE",
     "PYTHON_VERSION",
@@ -42,7 +44,12 @@ def test_semver_pins_are_exact() -> None:
     v = load_versions()
     for key in ("KIND_VERSION", "KUBECTL_VERSION", "HELM_VERSION"):
         assert re.fullmatch(r"v\d+\.\d+\.\d+", v[key]), f"{key}={v[key]}"
-    for key in ("KUBERAY_CHART_VERSION", "RAY_VERSION"):
+    for key in (
+        "KUBERAY_CHART_VERSION",
+        "PROMETHEUS_CHART_VERSION",
+        "GRAFANA_CHART_VERSION",
+        "RAY_VERSION",
+    ):
         assert re.fullmatch(r"\d+\.\d+\.\d+", v[key]), f"{key}={v[key]}"
 
 

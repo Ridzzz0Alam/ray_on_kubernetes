@@ -1,0 +1,76 @@
+# prometheus-community/prometheus, chart version PROMETHEUS_CHART_VERSION in infra/versions.env.
+# Minimal on purpose (ARCHITECTURE.md §6 budget): server + kube-state-metrics only, no Alertmanager,
+# node-exporter or pushgateway, 6h retention in an emptyDir, 30s scrapes. `make monitoring` installs it.
+alertmanager:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+configmapReload:
+  prometheus:
+    enabled: false # `make monitoring` re-installs on config changes; saves a sidecar
+
+kube-state-metrics:
+  enabled: true
+  image:
+    pullPolicy: Never # kind-loaded by `make monitoring`; never pulled at pod start
+  collectors: [resourcequotas, pods, namespaces] # only what the dashboard uses
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+server:
+  image:
+    pullPolicy: Never
+  retention: 6h
+  persistentVolume:
+    enabled: false
+  global:
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    evaluation_interval: 30s
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+# This chart builds scrape_configs from the `scrapeConfigs` map (key = job_name). Turn off its
+# defaults (cadvisor, nodes, apiserver, annotated pods/services, pushgateway) and add only what
+# the dashboard charts. Its own `prometheus` self-scrape job stays on.
+scrapeConfigs:
+  kubernetes-api-servers: {enabled: false}
+  kubernetes-nodes: {enabled: false}
+  kubernetes-nodes-cadvisor: {enabled: false}
+  kubernetes-service-endpoints: {enabled: false}
+  kubernetes-service-endpoints-slow: {enabled: false}
+  kubernetes-services: {enabled: false}
+  kubernetes-pods: {enabled: false}
+  kubernetes-pods-slow: {enabled: false}
+  prometheus-pushgateway: {enabled: false}
+  kube-state-metrics:
+    static_configs:
+      - targets: [prometheus-kube-state-metrics.monitoring.svc:8080]
+  # Ray's metrics agent on every head/worker of an rkp RayJob or RayService (port named "metrics").
+  ray:
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [team-a, team-b]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_managed_by]
+        regex: rkp
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: team
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_label_ray_io_node_type]
+        target_label: ray_node_type
+  # The platform API runs on the host (`make api`); its metrics listener binds the kind network
+  # gateway, which pods can reach. `make monitoring` substitutes the address.
+  rkp-api:
+    static_configs:
+      - targets: [RKP_API_METRICS_TARGET]

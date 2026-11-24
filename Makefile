@@ -8,8 +8,14 @@ KUBERAY_REPO := https://ray-project.github.io/kuberay-helm/
 TEAMS       := team-a team-b
 PROFILE     ?= tiny
 UIDGID      := $(shell id -u):$(shell id -g)
+PROM_REPO    := https://prometheus-community.github.io/helm-charts
+GRAFANA_REPO := https://grafana-community.github.io/helm-charts
+METRICS_PORT := 9108
+# IPv4 gateway of kind's docker network: the host as seen from pods. Lazy (=) so docker isn't
+# queried on every make call. The API's metrics listener binds it so Prometheus can scrape the host.
+KIND_GATEWAY = $(shell docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' | head -1)
 
-.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api data
+.PHONY: help tools sync lint fmt test test-k8s check diagrams up down image load hello teams keys api data monitoring monitoring-down grafana
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -78,5 +84,35 @@ data: ## Download + tokenize the training data/model once into .shared/data (PRO
 keys: ## Generate dev API keys: config/api_keys.yaml (server) + config/rkp.toml (CLI)
 	uv run python scripts/gen_keys.py
 
-api: ## Run the platform API on 127.0.0.1:8000 (uses the kind-rkp kube context)
-	uv run uvicorn --factory platform_api.main:create_app --host 127.0.0.1 --port 8000 --no-access-log
+api: ## Run the platform API on 127.0.0.1:8000 (+ /metrics for Prometheus on the kind gateway)
+	RKP_METRICS_ADDR=$(if $(KIND_GATEWAY),$(KIND_GATEWAY):$(METRICS_PORT)) \
+		uv run uvicorn --factory platform_api.main:create_app --host 127.0.0.1 --port 8000 --no-access-log
+
+monitoring: ## Minimal Prometheus + Grafana in ns monitoring (~0.9 GB; images pulled once, kind-loaded)
+	@test -n "$(KIND_GATEWAY)" || { echo "kind network not found: run make up first"; exit 1; }
+	@mkdir -p .cache
+	sed 's/RKP_API_METRICS_TARGET/$(KIND_GATEWAY):$(METRICS_PORT)/' infra/helm/prometheus-values.yaml > .cache/prometheus-values.yaml
+	{ helm template prometheus prometheus --repo $(PROM_REPO) --version $(PROMETHEUS_CHART_VERSION) \
+		-n monitoring -f .cache/prometheus-values.yaml; \
+	  helm template grafana grafana --repo $(GRAFANA_REPO) --version $(GRAFANA_CHART_VERSION) \
+		-n monitoring -f infra/helm/grafana-values.yaml; } \
+		| grep -oE 'image: "?[^" ]+' | sed -E 's/image: "?//' | sort -u > .cache/monitoring-images.txt
+	@# Save only the local platform: `kind load docker-image` imports --all-platforms and fails on
+	@# multi-arch images whose other platforms were never pulled (containerd image store).
+	@set -e; while read -r img; do \
+		docker image inspect "$$img" >/dev/null 2>&1 || docker pull -q "$$img" >/dev/null; \
+		docker save --platform linux/$$(docker version -f '{{.Server.Arch}}') -o .cache/img.tar "$$img"; \
+		kind load image-archive .cache/img.tar --name $(CLUSTER) >/dev/null; echo "loaded $$img"; \
+	done < .cache/monitoring-images.txt; truncate -s 0 .cache/img.tar
+	helm upgrade --install prometheus prometheus --repo $(PROM_REPO) --version $(PROMETHEUS_CHART_VERSION) \
+		--kube-context $(KUBECTX) -n monitoring --create-namespace -f .cache/prometheus-values.yaml --wait --timeout 5m
+	helm upgrade --install grafana grafana --repo $(GRAFANA_REPO) --version $(GRAFANA_CHART_VERSION) \
+		--kube-context $(KUBECTX) -n monitoring -f infra/helm/grafana-values.yaml \
+		--set-file dashboards.rkp.rkp.json=dashboards/rkp.json --wait --timeout 5m
+
+monitoring-down: ## Remove Prometheus + Grafana (frees ~0.9 GB for training runs)
+	-helm uninstall grafana prometheus --kube-context $(KUBECTX) -n monitoring
+	kubectl --context $(KUBECTX) delete namespace monitoring --ignore-not-found
+
+grafana: ## Port-forward Grafana to http://127.0.0.1:3000 (anonymous viewer; admin password in secret grafana)
+	kubectl --context $(KUBECTX) -n monitoring port-forward svc/grafana 3000:80
