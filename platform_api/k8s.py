@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from kubernetes import client, config
@@ -49,6 +50,11 @@ class KubeClient(Protocol):
         """The namespace's hard requests.cpu / requests.memory (tightest across its
         ResourceQuotas), or None when it has no quota."""
 
+    def pod_requests(self, namespace: str) -> dict[str, Resources]:
+        """Requests of the rkp pods that the namespace's ResourceQuota still counts, summed per
+        owner ("job/<id>" or "service/<name>"). Same rule as the quota: a pod stops counting
+        once it has finished (Succeeded/Failed) or its deletion grace period has run out."""
+
 
 def quota_from_hard(hards: list[dict[str, str]]) -> Resources | None:
     if not hards:
@@ -65,6 +71,39 @@ def quota_from_hard(hards: list[dict[str, str]]) -> Resources | None:
         UNBOUNDED if mem is None else int(mem / 2**20),
         UNBOUNDED if gpu is None else int(gpu),
     )
+
+
+def pod_owner(labels: dict[str, str]) -> str | None:
+    """The rkp job or service a pod belongs to, from the labels manifests.py puts on it."""
+    if "rkp.io/job-id" in labels:
+        return f"job/{labels['rkp.io/job-id']}"
+    if "rkp.io/service" in labels:
+        return f"service/{labels['rkp.io/service']}"
+    return None
+
+
+def quota_counts(pod: Any, now: datetime) -> bool:
+    """Kubernetes' pod quota rule: finished pods, and terminating pods past their grace
+    period, no longer count against the quota."""
+    if pod.status and pod.status.phase in ("Succeeded", "Failed"):
+        return False
+    deleted = pod.metadata.deletion_timestamp
+    if deleted is not None:
+        grace = pod.metadata.deletion_grace_period_seconds or 0
+        return now <= deleted + timedelta(seconds=grace)
+    return True
+
+
+def pod_spec_requests(pod: Any) -> Resources:
+    total = Resources()
+    for c in pod.spec.containers:
+        req = (c.resources and c.resources.requests) or {}
+        total += Resources(
+            int(parse_quantity(req.get("cpu", "0")) * 1000),
+            int(parse_quantity(req.get("memory", "0")) / 2**20),
+            int(parse_quantity(req.get(GPU_RESOURCE, "0"))),
+        )
+    return total
 
 
 class RealKube:
@@ -152,6 +191,22 @@ class RealKube:
         except ApiException as e:
             raise self._wrap(e) from e
         return quota_from_hard([q.spec.hard or {} for q in quotas.items if q.spec])
+
+    def pod_requests(self, namespace: str) -> dict[str, Resources]:
+        try:
+            pods = self._core.list_namespaced_pod(
+                namespace, label_selector="app.kubernetes.io/managed-by=rkp"
+            )
+        except ApiException as e:
+            raise self._wrap(e) from e
+        now = datetime.now(UTC)
+        totals: dict[str, Resources] = {}
+        for pod in pods.items:
+            owner = pod_owner(pod.metadata.labels or {})
+            if owner is None or not quota_counts(pod, now):
+                continue
+            totals[owner] = totals.get(owner, Resources()) + pod_spec_requests(pod)
+        return totals
 
     def pending_reason(self, namespace: str, job_id: str) -> str | None:
         try:

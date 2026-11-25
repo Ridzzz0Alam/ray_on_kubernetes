@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import yaml
+from kubernetes import client
 from kubernetes.utils import parse_quantity
 
 from platform_api.config import ROOT
-from platform_api.k8s import quota_from_hard
+from platform_api.k8s import pod_owner, pod_spec_requests, quota_counts, quota_from_hard
 from platform_api.manifests import build_rayjob, job_requests
 from platform_api.models import UNBOUNDED, JobSpec, Resources, memory_mib
 from platform_api.reconciler import reconcile_once
@@ -82,6 +85,62 @@ def test_over_quota_job_queues_then_runs_when_quota_frees(platform: Platform) ->
     assert state(platform, second) == "SUBMITTED"
     assert ("team-a", second["k8s_name"]) in platform.kube.rayjobs
     assert ("team-a", second["k8s_name"]) in platform.kube.configmaps  # code shipped too
+
+
+def test_queued_job_waits_until_the_finished_jobs_pods_are_gone(platform: Platform) -> None:
+    """The quota hand-over gap: a finished job's pods keep counting against the ResourceQuota
+    while they terminate, so the queued job is only admitted once they're gone."""
+    platform.kube.quotas["team-a"] = QUOTA
+    first = post(platform)
+    second = post(platform)
+    need = job_requests(JobSpec(**SMALL))
+    # first's own pods are already counted from the registry: not twice
+    platform.kube.pods["team-a"] = {f"job/{first['id']}": need}
+    finish(platform, first)  # RayJob deleted, pods still terminating
+    assert state(platform, first) == "SUCCEEDED"
+    assert state(platform, second) == "QUEUED"
+    message = platform.http.get(f"/jobs/{second['id']}", headers=platform.as_team(KEY_A)).json()
+    assert message["message"] == (
+        "waiting for quota: needs 0.8 CPU / 2504Mi, team-a uses 0.8 CPU / 2504Mi of "
+        "2 CPU / 4096Mi, 0.8 CPU / 2504Mi of it from finished work whose pods are still terminating"
+    )
+
+    platform.kube.pods["team-a"] = {}  # pods gone
+    reconcile_once(platform.registry, platform.kube, platform.http.app.state.admitter)  # type: ignore[attr-defined]
+    assert state(platform, second) == "SUBMITTED"
+
+
+def test_running_jobs_pods_are_not_counted_twice(platform: Platform) -> None:
+    platform.kube.quotas["team-a"] = Resources(cpu_m=2000, mem_mib=2 * 2504)
+    first = post(platform)
+    platform.kube.pods["team-a"] = {f"job/{first['id']}": job_requests(JobSpec(**SMALL))}
+    assert post(platform)["state"] == "SUBMITTED"  # 2 x 2504Mi fits exactly
+
+
+def _pod(phase: str = "Running", deleted_ago: float | None = None, grace: int = 30) -> client.V1Pod:
+    meta = client.V1ObjectMeta(labels={"rkp.io/job-id": "abc"})
+    if deleted_ago is not None:
+        # K8s sets deletionTimestamp to "now + grace" when the delete arrives.
+        meta.deletion_timestamp = datetime.now(UTC) + timedelta(seconds=grace - deleted_ago)
+        meta.deletion_grace_period_seconds = grace
+    res = client.V1ResourceRequirements(
+        requests={"cpu": "250m", "memory": "1536Mi", "example.com/gpu": "1"}
+    )
+    spec = client.V1PodSpec(containers=[client.V1Container(name="c", resources=res)])
+    return client.V1Pod(metadata=meta, spec=spec, status=client.V1PodStatus(phase=phase))
+
+
+def test_pod_quota_rule_matches_kubernetes() -> None:
+    now = datetime.now(UTC)
+    assert quota_counts(_pod(), now)
+    assert quota_counts(_pod(deleted_ago=5), now)  # terminating: still counted
+    assert not quota_counts(_pod(deleted_ago=70), now)  # past deletionTimestamp + grace
+    assert not quota_counts(_pod("Succeeded"), now)  # e.g. the finished submitter
+    assert not quota_counts(_pod("Failed"), now)
+    assert pod_spec_requests(_pod()) == Resources(250, 1536, 1)
+    assert pod_owner({"rkp.io/job-id": "abc", "rkp.io/team": "team-a"}) == "job/abc"
+    assert pod_owner({"rkp.io/service": "s"}) == "service/s"
+    assert pod_owner({"app": "other"}) is None
 
 
 def test_one_team_queueing_does_not_affect_the_other(platform: Platform) -> None:

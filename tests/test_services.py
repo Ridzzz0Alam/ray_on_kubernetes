@@ -122,6 +122,21 @@ def test_service_counts_against_quota_and_delete_frees_it(platform: Platform) ->
     assert job_now["state"] == "SUBMITTED"
 
 
+def test_service_is_busy_while_a_finished_jobs_pods_terminate(platform: Platform) -> None:
+    platform.kube.quotas["team-a"] = Resources(2000, 4096)
+    job = trained_job(platform)  # finished: the registry no longer counts it
+    platform.kube.pods["team-a"] = {f"job/{job['id']}": Resources(1250, 3072)}
+    r = serve(platform, job["id"])
+    assert r.status_code == 409
+    assert r.json()["detail"] == (
+        "service needs 1.25 CPU / 2560Mi, team-a uses 1.25 CPU / 3072Mi of 2 CPU / 4096Mi, "
+        "1.25 CPU / 3072Mi of it from finished work whose pods are still terminating: "
+        "retry in a few seconds"
+    )
+    platform.kube.pods["team-a"] = {}
+    assert serve(platform, job["id"]).status_code == 201
+
+
 def test_service_bigger_than_quota_is_422(platform: Platform) -> None:
     platform.kube.quotas["team-a"] = Resources(2000, 4096)
     r = serve(platform, trained_job(platform)["id"], workers=2, memory="4Gi")

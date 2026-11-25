@@ -113,7 +113,8 @@ node that's equivalent to shared storage. In production this would be S3/GCS (§
 - **Queueing (whole-job admission):** Kubernetes checks quota per pod, but a RayJob is a gang (head + workers +
   submitter). Left to K8s, two queued jobs could each get a head admitted, fill the quota, and leave neither able
   to start its workers. So `platform_api/admission.py` admits a job only when *all* its pod requests fit next to
-  the team's other admitted jobs (counted from the registry). A job that doesn't fit now is `QUEUED` with
+  the team's other admitted jobs (counted from the registry), plus any pods of finished jobs or deleted services
+  that are still terminating (the quota counts them until they're gone, by the same rule). A job that doesn't fit now is `QUEUED` with
   nothing created in K8s. The reconciler admits the queue FIFO per team, stopping at the first job that doesn't
   fit, so big jobs aren't starved. A job bigger than the whole quota is rejected with a 422. The ResourceQuota
   stays as the per-pod backstop. Queue time = submit → Ray driver start. Demo: `docs/demos/multi-tenancy.md`.

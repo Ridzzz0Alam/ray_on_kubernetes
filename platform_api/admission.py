@@ -50,15 +50,39 @@ class Admitter:
         self._lock = threading.Lock()
 
     def in_use(self, team: str) -> Resources:
-        """Requests of the team's admitted, unfinished jobs and live services (counted from the
-        registry, so a RayJob whose pods don't exist yet still counts)."""
-        total = Resources()
+        """Everything counting against the team's quota right now (see `usage`)."""
+        admitted, terminating = self.usage(team)
+        return admitted + terminating
+
+    def usage(self, team: str) -> tuple[Resources, Resources]:
+        """(admitted, terminating). Admitted: requests of the team's admitted, unfinished jobs
+        and live services, counted from the registry so a RayJob whose pods don't exist yet
+        still counts. Terminating: pods of finished jobs and deleted services that aren't gone
+        yet. The ResourceQuota counts those until they are, so admitting into that space
+        would get the new pods refused by the quota."""
+        admitted = Resources()
+        counted: set[str] = set()
         for job in self.registry.active(team):
             if job.state != JobState.QUEUED:
-                total += job_requests(JobSpec.model_validate(job.spec))
+                admitted += job_requests(JobSpec.model_validate(job.spec))
+                counted.add(f"job/{job.id}")
         for row in self.registry.live_services(team):
-            total += service_requests(ServiceSpec.model_validate_json(row["spec"]))
-        return total
+            spec = ServiceSpec.model_validate_json(row["spec"])
+            admitted += service_requests(spec)
+            counted.add(f"service/{spec.name}")
+        terminating = Resources()
+        for owner, requests in self.kube.pod_requests(team).items():
+            if owner not in counted:
+                terminating += requests
+        return admitted, terminating
+
+    def _uses(self, team: str, quota: Resources | None) -> str:
+        """'team-a uses X of Q', noting the part that is only pods still terminating."""
+        admitted, terminating = self.usage(team)
+        text = f"{team} uses {admitted + terminating} of {quota}"
+        if terminating != Resources():
+            text += f", {terminating} of it from finished work whose pods are still terminating"
+        return text
 
     def create_service(self, team: str, spec: ServiceSpec, files: dict[str, str]) -> None:
         """Create the RayService (+ its code) now, or raise QuotaExceeded / QuotaBusy."""
@@ -74,10 +98,13 @@ class Admitter:
             if queued:
                 raise QuotaBusy(f"{len(queued)} of {team}'s jobs are queued for quota ahead of it")
             if not self._fits_now(team, need, quota):
-                raise QuotaBusy(
-                    f"service needs {need}, {team} uses {self.in_use(team)} of {quota}: "
-                    "wait for running jobs to finish"
+                _, terminating = self.usage(team)
+                hint = (
+                    "retry in a few seconds"
+                    if terminating != Resources()
+                    else "retry when running jobs finish"
                 )
+                raise QuotaBusy(f"service needs {need}, {self._uses(team, quota)}: {hint}")
             name = service_k8s_name(spec.name)
             body = build_rayservice(team, spec, image=self.image, ray_version=self.ray_version)
             created = self.kube.create_rayservice(team, body)
@@ -142,7 +169,7 @@ class Admitter:
     def _waiting_message(
         self, team: str, need: Resources, quota: Resources | None, ahead: int
     ) -> str:
-        why = f"waiting for quota: needs {need}, {team} uses {self.in_use(team)} of {quota}"
+        why = f"waiting for quota: needs {need}, {self._uses(team, quota)}"
         return why + (f" ({ahead} queued ahead)" if ahead else "")
 
     def _launch(self, job_id: str, team: str, spec: JobSpec) -> None:

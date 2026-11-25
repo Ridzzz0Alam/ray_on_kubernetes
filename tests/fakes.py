@@ -17,6 +17,8 @@ class FakeKube:
         self.deleted: list[tuple[str, str]] = []
         self.quotas: dict[str, Resources] = {}  # namespace -> hard requests; none = unlimited
         self.unschedulable: dict[str, str] = {}  # job id -> scheduler message
+        # namespace -> owner ("job/<id>" / "service/<name>") -> requests of pods the quota counts
+        self.pods: dict[str, dict[str, Resources]] = {}
 
     def create_rayjob(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
         obj = {**body, "metadata": {**body["metadata"], "uid": str(uuid.uuid4())}}
@@ -55,6 +57,9 @@ class FakeKube:
 
     def get_quota(self, namespace: str) -> Resources | None:
         return self.quotas.get(namespace)
+
+    def pod_requests(self, namespace: str) -> dict[str, Resources]:
+        return dict(self.pods.get(namespace, {}))
 
     def pending_reason(self, namespace: str, job_id: str) -> str | None:
         return self.unschedulable.get(job_id)

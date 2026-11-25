@@ -239,10 +239,22 @@ def test_noisy_neighbour_queues_team_a_but_not_team_b(api: tuple[TestClient, Rea
         assert http.get(f"/jobs/{extra['id']}").json()["state"] == "QUEUED"
         assert http.get(f"/jobs/{hog['id']}").json()["state"] == "RUNNING"
 
-        # Freeing team-a's quota admits its queued job on the next reconcile.
+        # Freeing team-a's quota admits its queued job once hog's pods have terminated (the
+        # ResourceQuota counts them until then), so none of its pods is refused by the quota.
         http.delete(f"/jobs/{hog['id']}")
-        admitted = wait_for(http, extra["id"], {"SUBMITTED", "PENDING", "RUNNING"}, timeout=30)
+        admitted = wait_for(http, extra["id"], {"SUBMITTED", "PENDING", "RUNNING"}, timeout=120)
         assert admitted["message"] == "admitted from queue"
+        wait_for(http, extra["id"], {"RUNNING"}, timeout=180)
+        events = subprocess.run(
+            ["kubectl", "--context", "kind-rkp", "-n", "team-a", "get", "events", "-o", "json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        refused = [
+            line for line in events.splitlines() if "exceeded quota" in line and extra["id"] in line
+        ]
+        assert not refused, refused
     finally:
         for job in (hog, extra):
             if http.get(f"/jobs/{job['id']}").json()["state"] not in DONE:
@@ -261,7 +273,15 @@ def test_serve_latest_checkpoint_then_delete(api: tuple[TestClient, RealKube]) -
     try:
         job = wait_for(http, job_id, DONE, timeout=600)
         assert job["state"] == "SUCCEEDED", job["message"]
-        r = http.post("/services", json={"name": "e2e", "job_id": job_id})
+        # The training job's pods take a few seconds to terminate and still hold quota: the
+        # API says 409 "retry in a few seconds" until they're gone, so retry like a client.
+        deadline = time.monotonic() + 120
+        while (
+            r := http.post("/services", json={"name": "e2e", "job_id": job_id})
+        ).status_code == 409:
+            assert "retry in a few seconds" in r.text, r.text
+            assert time.monotonic() < deadline, r.text
+            time.sleep(3)
         assert r.status_code == 201, r.text
         deadline = time.monotonic() + 300
         while (svc := http.get("/services/e2e").json())["state"] != "RUNNING":

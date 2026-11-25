@@ -95,4 +95,6 @@ Training with monitoring on sits right at the budget. Run `make monitoring-down`
 - **Quota hand-over gap:** team-a's memory "used" touched the 4 GiB ceiling when a service was created right after a
   training job finished. The API had released the job's quota as soon as the RayJob was deleted, but its pods were still
   terminating, and Kubernetes counts terminating pods. The ResourceQuota backstop held the new pods back briefly, and
-  the service still came up. The fix would be to count a finished job until its pods are gone.
+  the service still came up. **Fixed after Phase 8:** the admitter now also counts the pods of finished jobs and deleted
+  services until they're gone (same rule as the quota: a pod stops counting once it has finished or its deletion grace
+  period is over). The noisy-neighbour e2e test checks that the queued job gets no `exceeded quota` events.
