@@ -24,6 +24,11 @@ SUBMITTER_CONTAINER = "ray-job-submitter"
 HEAD_MEMORY_MIB = 3072
 HEAD_CPU_REQUEST_M = 250
 SUBMITTER_REQUEST = Resources(cpu_m=50, mem_mib=200)
+# The head runs no tasks or replicas (num-cpus 0), and skips the autoscaler monitor (~115 MB
+# private memory, measured in the Phase 8 follow-up): worker groups are fixed size, and
+# KubeRay's probes only hit the dashboard agent. (The Ray Client server is just as unused but
+# can't be turned off: ray start rejects port 0.)
+HEAD_START_PARAMS = {"num-cpus": "0", "no-monitor": "true"}
 TTL_SECONDS = 60  # safety net; the reconciler deletes finished RayJobs itself
 
 
@@ -221,7 +226,7 @@ def _ray_cluster(
     return {
         "rayVersion": ray_version,
         "headGroupSpec": {
-            "rayStartParams": {"num-cpus": "0"},  # no tasks or replicas on the head
+            "rayStartParams": HEAD_START_PARAMS,
             "template": {
                 "metadata": {"labels": labels},
                 "spec": {"containers": [head], "volumes": volumes},

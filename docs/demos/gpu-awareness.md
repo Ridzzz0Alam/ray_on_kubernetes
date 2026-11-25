@@ -103,20 +103,21 @@ The first run used 512Mi for every worker. Team-b's gpu-sim worker never finishe
 killed the `gpu_step` task for memory pressure and kept retrying it. The job showed RUNNING indefinitely until it was
 cancelled. **512Mi is too small for a Ray worker that runs tasks.** The demo uses 640Mi for GPU workers.
 
-## Memory (over budget: open item)
+## Memory
 
 Three small Ray clusters at once (team-a GPU, team-b GPU waiting, team-b CPU) is the heaviest scenario so far:
 
 | Run | Node peak (excluding page cache) |
 |---|---|
 | Recorded demo, monitoring on | ~6.5 GiB |
-| Same scenario as `make test-k8s`, monitoring on | 7.24 GiB |
-| Same scenario in the full `make test-k8s`, **monitoring off** | **7.65 GiB** |
+| Same scenario in the full `make test-k8s`, monitoring off | 7.65 GiB (over the 7 GB budget) |
+| **After `--no-monitor` on the Ray heads:** `scripts/gpu_contention.sh 90`, monitoring off | **5.71 GiB** |
+| **After `--no-monitor`:** full `make test-k8s` (17/17), monitoring off | **6.84 GiB** |
 
-That's up to ~0.65 GB over the 7 GB budget for a short stretch (a few samples) while all three heads run. The
-laptop had the headroom, but it's not within the rule. The cost is the Ray heads: three at ~1.5–2 GB each, even for tiny
-jobs. **Next step:** slim the head for non-training jobs (fewer dashboard/agent processes, a smaller object store), or
-run the CPU job only after team-b's GPU job is admitted, so two clusters run at once instead of three.
+The cost was the Ray heads: ~1.4 GB of private memory each, even for tiny jobs. Measured per process, the
+biggest unused one was the autoscaler monitor (~115 MB), which does nothing with fixed-size worker groups, so heads
+now start with `--no-monitor`. The Ray Client server (~112 MB) is just as unused, but `ray start` rejects port 0, and
+trimming dashboard modules would mean patching the image's start command, so both stay.
 
 ## Ray Train on the simulated GPU
 

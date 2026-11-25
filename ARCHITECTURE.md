@@ -136,8 +136,8 @@ The node has about 4 vCPU and 15 GB. The stack target is **≤ 3 CPU requested a
 | **Total (one training job + monitoring)** | **~3.1** | **~8.5 GB** | Sum of limits, which are ceilings. Measured: **6.9 GiB for `tiny` training with no monitoring**, already near the 7 GB target. Phase 7 must keep monitoring small or turn it on only for demos |
 
 Rules: one RayCluster at a time, except in the multi-tenancy and GPU demos, which use small 1-worker clusters.
-Monitoring off during training (7.01 GiB with it on). The GPU demo's three small clusters peaked at 7.65 GiB even with monitoring off:
-over budget, and an open item (slim the Ray head).
+Monitoring off during training (7.01 GiB with it on). The GPU demo's three small clusters peaked at 7.65 GiB with monitoring off
+until the heads were started with `--no-monitor` (no autoscaler monitor, ~115 MB each); now 6.84 GiB in the full `make test-k8s`.
 Turn monitoring off when you don't need it (`make monitoring-down`).
 
 ## 7. GPU awareness

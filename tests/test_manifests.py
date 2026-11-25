@@ -28,7 +28,10 @@ def test_rayjob_shape() -> None:
     assert spec["backoffLimit"] == 2
     assert spec["shutdownAfterJobFinishes"] is True
     assert spec["rayClusterSpec"]["rayVersion"] == VERSIONS["RAY_VERSION"]
-    assert spec["rayClusterSpec"]["headGroupSpec"]["rayStartParams"] == {"num-cpus": "0"}
+    assert spec["rayClusterSpec"]["headGroupSpec"]["rayStartParams"] == {
+        "num-cpus": "0",
+        "no-monitor": "true",
+    }
     group = spec["rayClusterSpec"]["workerGroupSpecs"][0]
     assert group["replicas"] == group["minReplicas"] == group["maxReplicas"] == 3
     assert group["rayStartParams"] == {"num-cpus": "2"}

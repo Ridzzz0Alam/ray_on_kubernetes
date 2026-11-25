@@ -59,7 +59,7 @@ def test_service_cluster_mounts_checkpoints_read_only_and_has_no_submitter() -> 
     cluster = rs["spec"]["rayClusterConfig"]
     head = cluster["headGroupSpec"]["template"]["spec"]["containers"][0]
     worker_group = cluster["workerGroupSpecs"][0]
-    assert cluster["headGroupSpec"]["rayStartParams"] == {"num-cpus": "0"}
+    assert cluster["headGroupSpec"]["rayStartParams"] == {"num-cpus": "0", "no-monitor": "true"}
     assert worker_group["rayStartParams"] == {"num-cpus": "2"}
     mounts = {m["name"]: m for m in head["volumeMounts"]}
     assert mounts["checkpoints"]["readOnly"] is True
