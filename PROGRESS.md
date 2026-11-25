@@ -6,6 +6,33 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-25: Phase 8 follow-ups (memory budget, quota hand-over gap). Session paused here
+
+**Done**
+- **Memory budget:** Ray heads start with `--no-monitor` (`HEAD_START_PARAMS` in `platform_api/manifests.py`). Measured per process, a tiny
+  job's head uses ~1.4 GB private memory, and the autoscaler monitor (~115 MB) is unused with fixed-size worker groups.
+  Full `make test-k8s` peak: **7.65 → 6.84 GiB** (monitoring off; the peak is in the GPU test). `scripts/gpu_contention.sh 90`: 5.71 GiB.
+- **Quota hand-over gap:** `Admitter.usage()` = registry-counted admitted work + requests of rkp pods still terminating for finished jobs or
+  deleted services (`KubeClient.pod_requests`, same rule as K8s' pod quota evaluator: not counted once Succeeded/Failed or past
+  deletionTimestamp + grace). Messages say how much is "from finished work whose pods are still terminating".
+  A service created right after its training job finishes now gets **409 "retry in a few seconds"** for that moment.
+- The noisy-neighbour e2e test asserts the queued job gets no `exceeded quota` events. Without the fix it fails
+  (`used: requests.memory=4040Mi, limited: 4Gi`), and with it it passes. The serve e2e test retries the 409.
+- Tests: 106 unit tests, **17/17 `make test-k8s`** (17m17s).
+
+**State:** everything is committed (not pushed). The cluster is deleted and nothing is running.
+
+**Next:** Phase 9 (polish: README quickstart, architecture diagram, screenshots, results table, `rkp serve` CLI, which should retry
+the 409 "retry in a few seconds"). The cloud GPU run is still optional and needs owner approval.
+
+**Gotchas**
+- `ray start --ray-client-server-port=0` crashes the head (Ray only accepts ports 1024–65535), so the unused Ray Client server (~112 MB) stays.
+  Trimming dashboard modules is only possible through the dashboard's own argument, not `ray start`.
+- Plain `uv run pytest` also runs the k8s tests. Use `make test`. `cmd | tail` in a background run hides the exit code, so use `; echo rc=$?`.
+- Measure node memory with `docker exec rkp-control-plane` reading `memory.current − active_file − inactive_file` from the cgroup.
+
+---
+
 ## 2026-11-24: Phase 8 complete (GPU awareness, simulated). Session paused here
 
 **Done**
