@@ -143,6 +143,8 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 
 ## Phase 9: Polish (Sun evening)
 
+- [x] `rkp serve create|status|list|delete` CLI; `create` retries the transient 409 "retry in a few seconds"
+
 - [ ] README: architecture diagram, a 5-minute quickstart, screenshots, results table
 - [ ] `docs/demos/*.md` for each acceptance demo
 - [ ] Turn the rough README case study into the full one: fill in §12 Results, remove 🚧 markers, add screenshots
@@ -208,3 +210,4 @@ production follow-ups in ARCHITECTURE.md §9.
 | 2026-11-24 | Demo worker sizes: 640Mi GPU workers, 512Mi CPU worker | A Ray worker node's own processes use ~0.45 GB. At 512Mi a task-running worker was OOM-killed in a loop by Ray's memory monitor. The sizes fit two jobs in team-b's 4Gi quota (2056 + 1992Mi) |
 | 2026-11-25 | Ray heads start with `--no-monitor` | The autoscaler monitor (~115 MB private per head) is unused with fixed-size worker groups, and KubeRay probes only the dashboard agent. Brought the 3-cluster GPU scenario from 7.65 to 6.84 GiB peak in `make test-k8s`. The Ray Client server is also unused but can't be disabled (`ray start` rejects port 0) |
 | 2026-11-25 | Admission also counts terminating pods of finished jobs and deleted services, using Kubernetes' own pod quota rule | Closes the quota hand-over gap: the API freed a job's quota when its RayJob was deleted, and the next job's pods were refused by the ResourceQuota (`exceeded quota … used 4040Mi, limited 4Gi`) until the old pods were gone. Counting actual pod requests (one pod list per team) beats a fixed delay. Side effect: a service created right after its training job finishes gets 409 "retry in a few seconds" for that moment instead of pods held back by the quota |
+| 2026-11-27 | `rkp serve create` retries only the 409 that says "retry in a few seconds", for up to 120s | That 409 clears on its own once a finished job's pods are gone. Other 409s (job not SUCCEEDED, name taken, quota held by running work) and 422s need the user to act, so the CLI fails at once on those |

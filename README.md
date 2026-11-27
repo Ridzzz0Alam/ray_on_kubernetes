@@ -220,6 +220,7 @@ make data        # training data + model → .shared/data (once; PROFILE=distilb
 make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
 make api         # platform API on 127.0.0.1:8000, in another terminal
 uv run rkp submit --team team-a workloads/hello.py    # see §4
+uv run rkp serve create sentiment <job-id> -t team-a  # serve a trained checkpoint (docs/demos/serving.md)
 make monitoring  # minimal Prometheus + Grafana (~0.3 GB idle); make monitoring-down before long training runs
 make grafana     # dashboard on http://127.0.0.1:3000/d/rkp
 uv run rkp cost --since 7d                          # CPU-hours, GB-hours and cost per team

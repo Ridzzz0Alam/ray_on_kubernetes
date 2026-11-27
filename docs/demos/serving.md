@@ -24,15 +24,30 @@ make up && make teams && make keys    # once
 make api                              # in another terminal
 uv run rkp submit --team team-a workloads/train --script train.py -- --profile tiny --epochs 2
 #   e31235ff ... [136s] SUCCEEDED
-curl -s -X POST localhost:8000/services -H "X-API-Key: $KEY" \
-     -d '{"name": "sentiment", "job_id": "e31235ff"}'          # → DEPLOYING, RUNNING ~35s later
+uv run rkp serve create sentiment e31235ff --team team-a      # → DEPLOYING, RUNNING ~35-45s later
 kubectl -n team-a port-forward svc/rkp-svc-sentiment-serve-svc 8001:8000 &
 kubectl -n team-a port-forward svc/rkp-svc-sentiment-head-svc 8265:8265 &   # dashboard: replica count
 uv run python scripts/load_test.py --stages 1:20,5:20,10:20,20:40 --cooldown 150
-curl -s -X DELETE localhost:8000/services/sentiment -H "X-API-Key: $KEY"  # → DELETED, all pods gone
+uv run rkp serve delete sentiment --team team-a              # → DELETED, all pods gone
 ```
 
+`rkp serve create` retries the API's 409 "retry in a few seconds" (the training job's pods are still terminating and
+hold quota) for up to `--retry-for` seconds (default 120), and fails at once on any other 409 or 422. With `--wait`
+(the default) it follows the service until RUNNING and exits 1 if it becomes UNHEALTHY. `rkp serve list` and
+`rkp serve status NAME` show live services.
+
 ## Output
+
+```
+$ uv run rkp serve create sentiment 9861002c --team team-a
+sentiment
+[    0s] DEPLOYING
+[   45s] RUNNING
+POST http://rkp-svc-sentiment-serve-svc.team-a.svc:8000/predict
+$ uv run rkp serve list --team team-a
+NAME                 STATE      JOB        ENDPOINT
+sentiment            RUNNING    9861002c   http://rkp-svc-sentiment-serve-svc.team-a.svc:8000/predict
+```
 
 ```
 $ curl -s localhost:8001/predict -d '{"text": "Great product, works perfectly and arrived early."}'

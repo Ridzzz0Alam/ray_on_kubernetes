@@ -46,7 +46,9 @@ Everything runs on a **2-core / 15 GB laptop**.
 ### 3.2 SDK / CLI (`sdk/`)
 A thin `httpx` client plus a Typer CLI (`rkp`). The CLI reads the API URL and key from env (`RKP_API_URL`,
 `RKP_API_KEY`) or a TOML file (`RKP_CONFIG`, else `~/.config/rkp.toml`, else the repo's `config/rkp.toml`).
-`--team` picks which key from the file to use.
+`--team` picks which key from the file to use. Commands: `submit | status | logs | cancel | list | cost` for jobs and
+`serve create | status | list | delete` for services. `serve create` retries the API's transient 409
+("retry in a few seconds") and then waits until the service is RUNNING.
 
 ### 3.3 Ray runtime image (`docker/`)
 One image for every workload: `rayproject/ray:<pinned>-py312-cpu` with CPU-only torch,
