@@ -123,6 +123,10 @@ $ rkp logs <id> | grep 'rank 0'
 [rank 0] {'epoch': 2, 'train_loss': 0.2303, 'eval_loss': 0.3455, 'eval_accuracy': 0.853, 'epoch_seconds': 35.7}
 ```
 
+Mid-run in the Ray dashboard, both workers are busy at about 97% CPU each, and the head holds the driver:
+
+![Ray dashboard during training: head + 2 workers](docs/screenshots/phase-9/ray-dashboard-training-nodes.jpg)
+
 Fault tolerance has two layers:
 
 | Failure | Handled by | Effect |
@@ -159,7 +163,12 @@ fixed 2-CPU worker pod, and the service counts against the team quota.
 
 Measured: replicas went **1 → 3** under load and back to 1 38s after it stopped. p50 was 12 ms with 1 client and 210 ms with 20.
 Throughput was capped at about 90 req/s by the single Serve HTTP proxy (100% of one core), not by the replicas
-([recorded run and analysis](docs/demos/serving.md)).
+([recorded run and analysis](docs/demos/serving.md)). A second run on 2026-11-27 reproduced it: 1 → 3 → 1 (back to 1 after 40s),
+p50 205 ms at 20 clients, about 94 req/s, 0 errors.
+
+| Idle: 1 replica | Under 20 clients: 3 replicas |
+|---|---|
+| ![Serve at 1 replica](docs/screenshots/phase-9/ray-dashboard-serve-1-replica.jpg) | ![Serve at 3 replicas](docs/screenshots/phase-9/ray-dashboard-serve-3-replicas.jpg) |
 
 ## 8. Observability and cost ✅
 
@@ -175,6 +184,8 @@ Throughput was capped at about 90 req/s by the single Serve HTTP proxy (100% of 
 metrics are computed from the job registry at scrape time. After the noisy-neighbour demo the dashboard shows team-a's
 queue time stepping 34s → 141s → 246s while team-b's stays at 33s ([recorded run with screenshots](docs/demos/observability.md)).
 
+![Grafana: queue time per team during the noisy-neighbour demo](docs/screenshots/phase-7/grafana-noisy-neighbour-queueing.jpg)
+
 **Cost report** (`rkp cost --since 7d`): pod requests × time held (job: driver start → finish; service: create →
 delete), × rates from `config/rates.yaml`. The arithmetic is unit-tested against registry rows.
 
@@ -183,6 +194,8 @@ device plugin would) and `JobSpec.gpus: 1` adds a `gpu-sim` worker that holds it
 Measured: team-b's GPU job waited **150s** Pending (`Insufficient example.com/gpu`, shown in `rkp status`) while
 team-a held the GPU, and team-b's CPU job finished in 36s meanwhile ([recorded run with screenshots](docs/demos/gpu-awareness.md)).
 A real cloud GPU run would need owner approval and wasn't done.
+
+![Grafana: simulated GPUs used vs quota during the contention demo](docs/screenshots/phase-8/grafana-gpu-contention-quota.jpg)
 
 ## 9. Key decisions and trade-offs
 
@@ -288,18 +301,28 @@ kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).
 CI (GitHub Actions) runs the static and unit layers on every push. The cluster tests run locally, because a kind
 cluster with Ray needs more than CI runners comfortably provide.
 
-## 12. Results 🚧
+## 12. Results
 
-These will be filled in from real runs. No numbers until they're measured.
+All numbers are from real runs on the dev laptop (2 cores / 4 threads, 15 GB, no GPU; single-node kind; `bert-tiny`).
+The linked demo docs have the raw output.
 
-| Measure | Result |
-|---|---|
-| Training time, `tiny`, 2 workers, 2 epochs | 97s of training (~35s/epoch); 2m27s from submit to SUCCEEDED |
-| Eval accuracy | 85.3% on 1k held-out reviews (85.1% after epoch 1) |
-| Work lost when a worker is killed mid-epoch | The partial epoch only: resumed from the epoch-1 checkpoint and finished at 85.6% |
-| Team-b queue time while team-a is saturated | 34s, the same as an unloaded cluster (team-a: 34s → 137s → 244s) |
-| Serve replicas under load / p50 latency | 1 → 3 → 1 replicas; p50 12 ms (1 client) to 210 ms (20 clients), about 90 req/s through one Serve proxy |
-| Peak stack RAM | 6.9 GiB for `tiny` training (head 2.76 + 2 × 1.33 GiB workers + kind + operator, counted as Ray does, without page cache), and **7.01 GiB with monitoring on**, against a 7 GB budget. 4.53 GiB for the 2-team demo with monitoring |
+| Area | Measure | Result |
+|---|---|---|
+| Training | `tiny`, 2 workers, 2 epochs | ~35s per epoch. Submit → SUCCEEDED in 2m13s–2m27s, of which 33–40s is starting the Ray cluster |
+| Training | Eval accuracy (1k held-out reviews) | **85.3%** (85.1% after epoch 1), the same in 3 separate runs |
+| Fault tolerance | A worker pod killed mid-epoch | Ray Train restarted the group from the epoch-1 checkpoint. Only the partial epoch was lost: it finished at 85.6% in ~2m50s (vs ~2m27s) |
+| Fault tolerance | A job that always crashes, `retries: 2` | FAILED with "failed after 3 attempts", no pods left (`make test-k8s`) |
+| Fault tolerance | Cancel during training | CANCELLED, all pods gone (`make test-k8s`) |
+| Multi-tenancy | Team-b queue time while team-a floods its quota | **34s**, the same as on an idle cluster. Team-a's own jobs queued: 34s → 137s → 244s ([demo](docs/demos/multi-tenancy.md)) |
+| Multi-tenancy | Job bigger than the team's whole quota | 422 with the numbers, nothing created in K8s |
+| GPU (simulated) | Team-b GPU job while team-a holds the only GPU | Pending **150s** (`Insufficient example.com/gpu` in `rkp status`). Team-b's CPU job finished in 36s meanwhile ([demo](docs/demos/gpu-awareness.md)) |
+| Serving | `rkp serve create` → RUNNING | 30–45s |
+| Serving | Replicas under a 1 → 20 client ramp | 1 → 3, back to 1 38–40s after the load stops, 0 errors ([demo](docs/demos/serving.md)) |
+| Serving | Latency / throughput | p50 12 ms (1 client) to 205–210 ms (20 clients). ~90–94 req/s, capped by the single Serve HTTP proxy, not by the replicas |
+| Cost | `rkp cost` | CPU-hours, GB-hours and cost per team from pod requests × time held. The arithmetic is unit-tested against registry rows |
+| Footprint | Peak node RAM (without page cache) | 6.9 GiB for `tiny` training, 7.01 GiB with monitoring on. 6.84 GiB for the full `make test-k8s` (3 small clusters at once in the GPU test). Budget: ~7 GB |
+| Getting started | Quickstart (cluster up → train → serve → predict → cost) | ~6 min after the one-time image build (§10) |
+| Tests | Unit / end-to-end | 110 unit tests with no cluster needed. 17 end-to-end tests against kind in ~17 min |
 
 ## 13. What production would change
 

@@ -79,6 +79,18 @@ t= 137.9s  clients= 0  replicas=1    (38s after the load stopped)
 **Result:** replicas scaled **1 → 3** under load and **back to 1** 38s after the load stopped, with 0 errors across 8,948 requests.
 p50 latency was **12 ms** with 1 client and 210 ms with 20. The node peaked at **5.06 GiB** (excluding page cache).
 
+## Screenshots (second run, 2026-11-27)
+
+The same ramp, re-run: 1 → 3 → 1 replicas (back to 1 after 40s), p50 12 ms → 205 ms, about 94 req/s, 0 errors.
+
+| Idle: 1 replica | Under 20 clients: 3 replicas |
+|---|---|
+| ![Serve at 1 replica](../screenshots/phase-9/ray-dashboard-serve-1-replica.jpg) | ![Serve at 3 replicas](../screenshots/phase-9/ray-dashboard-serve-3-replicas.jpg) |
+
+The three `ServeReplica` actors under load, next to the two HTTP proxies and the controller:
+
+![Serve replica actors](../screenshots/phase-9/ray-dashboard-serve-replica-actors.jpg)
+
 ## What limits throughput here (measured)
 
 Throughput stayed at about 80–95 req/s however many replicas ran, so latency grew with the client count. During a 20-client burst:
