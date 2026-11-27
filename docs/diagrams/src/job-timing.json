@@ -1,0 +1,163 @@
+[
+ {
+  "type": "text",
+  "x": 20,
+  "y": 0,
+  "text": "Where a training job's 2m13s goes",
+  "fontSize": 28
+ },
+ {
+  "type": "text",
+  "x": 40,
+  "y": 62,
+  "text": "submit → SUCCEEDED, tiny profile, 2 workers, 2 epochs (one recorded run)",
+  "fontSize": 16,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "rectangle",
+  "x": 40,
+  "y": 100,
+  "width": 247.5,
+  "height": 80,
+  "backgroundColor": "#ffd8a8",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "Ray cluster start-up\n33s\nhead + 2 worker pods\nscheduled, started, joined",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 287.5,
+  "y": 100,
+  "width": 750.0,
+  "height": 80,
+  "backgroundColor": "#a5d8ff",
+  "strokeColor": "#4a9eed",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "driver running: 100s\n(Ray Train job on the cluster)",
+   "fontSize": 16
+  }
+ },
+ {
+  "type": "text",
+  "x": 40,
+  "y": 192,
+  "text": "0s",
+  "fontSize": 14,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "text",
+  "x": 245.5,
+  "y": 192,
+  "text": "33s",
+  "fontSize": 14,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "text",
+  "x": 982.5,
+  "y": 192,
+  "text": "133s",
+  "fontSize": 14,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "text",
+  "x": 287.5,
+  "y": 232,
+  "text": "what the 100s of driver time is made of:",
+  "fontSize": 16,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "rectangle",
+  "x": 287.5,
+  "y": 265,
+  "width": 253.49999999999997,
+  "height": 70,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "epoch 1\n33.8s",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 541.0,
+  "y": 265,
+  "width": 265.5,
+  "height": 70,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "epoch 2\n35.4s",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 806.5,
+  "y": 265,
+  "width": 231.0,
+  "height": 70,
+  "backgroundColor": "#e9ecef",
+  "strokeColor": "#868e96",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "≈31s outside the epochs:\nworker group start, data +\nmodel load, checkpoints",
+   "fontSize": 14
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 292.5,
+  "y": 180,
+  "width": 0,
+  "height": 80,
+  "strokeColor": "#4a9eed",
+  "strokeStyle": "dashed"
+ },
+ {
+  "type": "arrow",
+  "x": 1032.5,
+  "y": 180,
+  "width": 0,
+  "height": 80,
+  "strokeColor": "#4a9eed",
+  "strokeStyle": "dashed"
+ },
+ {
+  "type": "rectangle",
+  "x": 40,
+  "y": 370,
+  "width": 1000,
+  "height": 60,
+  "backgroundColor": "#fff3bf",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "About a quarter of the job is cluster start-up: the price of one RayCluster per job.\nIt's paid once per job, not per epoch, so it weighs most on short jobs.",
+   "fontSize": 15
+  }
+ }
+]

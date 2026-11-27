@@ -1,0 +1,165 @@
+[
+ {
+  "type": "text",
+  "x": 20,
+  "y": 0,
+  "text": "Memory: where the 7 GiB budget goes",
+  "fontSize": 28
+ },
+ {
+  "type": "text",
+  "x": 40,
+  "y": 62,
+  "text": "peak node RAM during tiny training, counted without page cache (measured in Phase 3)",
+  "fontSize": 16,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "rectangle",
+  "x": 40,
+  "y": 110,
+  "width": 372.59999999999997,
+  "height": 90,
+  "backgroundColor": "#d0bfff",
+  "strokeColor": "#8b5cf6",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "Ray head\n2.76 GiB\n(driver, GCS, dashboard)",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 412.59999999999997,
+  "y": 110,
+  "width": 179.55,
+  "height": 90,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "worker 1\n1.33 GiB",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 592.15,
+  "y": 110,
+  "width": 179.55,
+  "height": 90,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "worker 2\n1.33 GiB",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 771.7,
+  "y": 110,
+  "width": 199.8,
+  "height": 90,
+  "backgroundColor": "#e9ecef",
+  "strokeColor": "#868e96",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "kind node,\nKubeRay operator,\nthe rest\n≈1.48 GiB",
+   "fontSize": 14
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 971.5,
+  "y": 110,
+  "width": 14.85,
+  "height": 90,
+  "backgroundColor": "#eebefa",
+  "strokeColor": "#ec4899",
+  "roundness": {
+   "type": 3
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 985.0,
+  "y": 75,
+  "width": 0,
+  "height": 30,
+  "strokeColor": "#ef4444"
+ },
+ {
+  "type": "text",
+  "x": 925.0,
+  "y": 50,
+  "text": "7 GiB budget",
+  "fontSize": 15,
+  "strokeColor": "#ef4444"
+ },
+ {
+  "type": "text",
+  "x": 40,
+  "y": 215,
+  "text": "0",
+  "fontSize": 14,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "text",
+  "x": 901.5,
+  "y": 215,
+  "text": "6.9",
+  "fontSize": 14,
+  "strokeColor": "#495057"
+ },
+ {
+  "type": "rectangle",
+  "x": 40,
+  "y": 285,
+  "width": 440,
+  "height": 95,
+  "backgroundColor": "#eebefa",
+  "strokeColor": "#ec4899",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "monitoring on (Prometheus + Grafana, ~0.3 GB idle)\npushes the training peak to 7.01 GiB,\nso it stays off during training runs",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 510,
+  "y": 285,
+  "width": 480,
+  "height": 95,
+  "backgroundColor": "#fff3bf",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "Since then heads start with --no-monitor: the autoscaler\nmonitor is unused with fixed-size worker groups and\ncost ~115 MB per head. A tiny job's head still needs ~1.4 GB.",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "text",
+  "x": 916.5,
+  "y": 235,
+  "text": "7.01 with\nmonitoring",
+  "fontSize": 14,
+  "strokeColor": "#ec4899"
+ }
+]

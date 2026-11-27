@@ -1,0 +1,209 @@
+[
+ {
+  "type": "text",
+  "x": 20,
+  "y": 0,
+  "text": "The quota hand-over gap, and the fix",
+  "fontSize": 28
+ },
+ {
+  "type": "text",
+  "x": 20,
+  "y": 60,
+  "text": "Before: quota freed when the RayJob is deleted",
+  "fontSize": 18,
+  "strokeColor": "#ef4444"
+ },
+ {
+  "type": "rectangle",
+  "x": 20,
+  "y": 95,
+  "width": 200,
+  "height": 95,
+  "backgroundColor": "#e9ecef",
+  "strokeColor": "#868e96",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "job A finishes;\nreconciler deletes\nits RayJob, registry\nfrees A's quota",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 220,
+  "y": 142,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 260,
+  "y": 95,
+  "width": 200,
+  "height": 95,
+  "backgroundColor": "#a5d8ff",
+  "strokeColor": "#4a9eed",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "API admits job B\nat once (registry\nsays there's room)",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 460,
+  "y": 142,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 500,
+  "y": 95,
+  "width": 220,
+  "height": 95,
+  "backgroundColor": "#ffd8a8",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "A's pods still\nTerminating: the\nK8s ResourceQuota\nstill counts them",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 720,
+  "y": 142,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 760,
+  "y": 95,
+  "width": 280,
+  "height": 95,
+  "backgroundColor": "#ffc9c9",
+  "strokeColor": "#ef4444",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "B's pods refused:\nexceeded quota, used 4040Mi,\nlimited 4Gi, until A's\npods are gone",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "text",
+  "x": 20,
+  "y": 235,
+  "text": "After: usage = admitted work in the registry + requests of pods still terminating",
+  "fontSize": 18,
+  "strokeColor": "#15803d"
+ },
+ {
+  "type": "rectangle",
+  "x": 20,
+  "y": 270,
+  "width": 200,
+  "height": 95,
+  "backgroundColor": "#e9ecef",
+  "strokeColor": "#868e96",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "job A finishes;\nits pods start\nterminating",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 220,
+  "y": 317,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 260,
+  "y": 270,
+  "width": 200,
+  "height": 95,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "usage still counts\nA's terminating pods\n(K8s' own pod\nquota rule)",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 460,
+  "y": 317,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 500,
+  "y": 270,
+  "width": 220,
+  "height": 95,
+  "backgroundColor": "#fff3bf",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "job B waits QUEUED\na few seconds\n(a service gets 409\n\"retry in a few seconds\")",
+   "fontSize": 14
+  }
+ },
+ {
+  "type": "arrow",
+  "x": 720,
+  "y": 317,
+  "width": 40,
+  "height": 0,
+  "strokeColor": "#1e1e1e"
+ },
+ {
+  "type": "rectangle",
+  "x": 760,
+  "y": 270,
+  "width": 280,
+  "height": 95,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "A's pods gone → B admitted;\nits pods start cleanly,\nno exceeded-quota events",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "text",
+  "x": 20,
+  "y": 395,
+  "text": "The e2e noisy-neighbour test now asserts there are no 'exceeded quota' events: without the fix it fails, with it it passes.",
+  "fontSize": 15,
+  "strokeColor": "#495057"
+ }
+]

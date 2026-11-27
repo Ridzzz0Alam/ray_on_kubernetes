@@ -1,11 +1,97 @@
 [
-  {"type":"text","x":20,"y":0,"text":"Testing: cheap layers in CI, expensive layers locally","fontSize":28},
-
-  {"type":"rectangle","x":330,"y":70,"width":280,"height":60,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"static: ruff + shellcheck\nruns in CI on every push","fontSize":15}},
-  {"type":"rectangle","x":300,"y":140,"width":340,"height":60,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"config guard: every version pinned,\nimage digest (tests/test_versions.py)","fontSize":15}},
-  {"type":"rectangle","x":240,"y":210,"width":460,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"unit — 110 tests, no cluster needed\nmanifests, auth scoping, reconciler,\nCLI over a fake K8s client","fontSize":15}},
-  {"type":"rectangle","x":170,"y":290,"width":600,"height":70,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"end-to-end against kind — 17 tests, ~17 min\nworker-kill resume · retries · quotas + RBAC\nserving autoscaling · GPU contention","fontSize":15}},
-  {"type":"rectangle","x":170,"y":370,"width":600,"height":70,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","strokeWidth":1,"roundness":{"type":3},"label":{"text":"scripts: chaos_kill_worker.sh · noisy_neighbour.sh\nload_test.py — run inside the e2e suite","fontSize":15}},
-
-  {"type":"text","x":170,"y":460,"text":"CI runs the top two layers on every push; the cluster layers run locally\n(a kind cluster with Ray needs more than CI runners give)","fontSize":16}
+ {
+  "type": "text",
+  "x": 20,
+  "y": 0,
+  "text": "Testing: cheap layers in CI, expensive layers locally",
+  "fontSize": 28
+ },
+ {
+  "type": "rectangle",
+  "x": 330,
+  "y": 70,
+  "width": 280,
+  "height": 60,
+  "backgroundColor": "#d0bfff",
+  "strokeColor": "#8b5cf6",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "static: ruff + shellcheck\nruns in CI on every push",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 300,
+  "y": 140,
+  "width": 340,
+  "height": 60,
+  "backgroundColor": "#c3fae8",
+  "strokeColor": "#06b6d4",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "config guard: every version pinned,\nimage digest (tests/test_versions.py)",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 240,
+  "y": 210,
+  "width": 460,
+  "height": 70,
+  "backgroundColor": "#b2f2bb",
+  "strokeColor": "#22c55e",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "unit — 110 tests, no cluster needed\nmanifests, auth scoping, reconciler,\nCLI over a fake K8s client",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 170,
+  "y": 290,
+  "width": 600,
+  "height": 70,
+  "backgroundColor": "#ffd8a8",
+  "strokeColor": "#f59e0b",
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "end-to-end against kind — 17 tests, ~17 min\nworker-kill resume · retries · cancel · quotas + RBAC\nserving (deploy → predict → delete) · GPU contention",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "rectangle",
+  "x": 170,
+  "y": 370,
+  "width": 600,
+  "height": 70,
+  "backgroundColor": "#fff3bf",
+  "strokeColor": "#f59e0b",
+  "strokeWidth": 1,
+  "roundness": {
+   "type": 3
+  },
+  "label": {
+   "text": "demos: noisy_neighbour.sh · load_test.py (autoscaling)\nchaos_kill_worker.sh also runs inside the e2e suite",
+   "fontSize": 15
+  }
+ },
+ {
+  "type": "text",
+  "x": 170,
+  "y": 460,
+  "text": "CI runs the top three layers on every push; the cluster layers run locally\n(a kind cluster with Ray needs more than CI runners give)",
+  "fontSize": 16
+ }
 ]
