@@ -6,6 +6,27 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-27: four new diagrams + ARTICLE.md case study
+
+**Done**
+- 4 new diagram sources in `docs/diagrams/src/` (`admission-flow`, `serving-autoscaling`, `observability-cost`, `testing-pyramid`),
+  rendered via `make diagrams` to `.excalidraw` + `.svg` alongside the existing 4. Layouts verified geometrically with a
+  throwaway script (labels fit their boxes, no arrow crosses a box interior): all four clean; the pre-existing `architecture`
+  "hits" are intentional container boxes, untouched.
+- `ARTICLE.md` (repo root): article-format case study of the README with all 8 diagrams + 5 screenshots embedded and added
+  depth beyond the README: admission control + usage accounting (the quota hand-over gap), checkpoint restore detail
+  (optimizer + epoch counter, not just weights), the Serve-proxy throughput cap analysis, a recorded cost table, a Testing
+  section with the layer funnel, a condensed quickstart, and a production-successor list. Every number traced back to README/PROGRESS.
+
+**State:** committed, not pushed. Pure docs work; no cluster was started and nothing is running.
+
+**Gotchas:** this session's agent could not view images (screenshot reads unsupported), so the new diagram layouts were verified
+with an overlap-check script rather than visually — worth a quick look at the SVGs or in excalidraw.com before publishing.
+Headless-chrome renders are in `/tmp/opencode/*.png`. Re-rendering all diagrams with `make diagrams` is deterministic
+(fixed seeds), and the Virgil font is cached in `.cache/` so existing SVGs don't churn.
+
+---
+
 ## 2026-11-27: Phase 9 started: `rkp serve` CLI
 
 **Done**
