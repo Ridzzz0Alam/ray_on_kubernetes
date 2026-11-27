@@ -57,14 +57,15 @@ many of the decisions (§9): a single-node cluster, one Ray cluster at a time, a
 
 | Component | Role |
 |---|---|
-| **`rkp` CLI / SDK** | Thin HTTP client: `submit`, `status`, `logs`, `cancel`, `list`, `cost` |
-| **platform_api** (FastAPI) | Maps the API key to a team and namespace, builds Ray CRs from a validated `JobSpec`, serves `/metrics` |
+| **`rkp` CLI / SDK** | Thin HTTP client: `submit`, `status`, `logs`, `cancel`, `list`, `cost`, `serve create/status/list/delete` |
+| **platform_api** (FastAPI) | Maps the API key to a team and namespace, builds Ray CRs from a validated `JobSpec` and ships the code in a ConfigMap, serves `/metrics` and `/cost` |
+| **Admission** | Checks each job or service against the team's `ResourceQuota` before creating anything. A job that doesn't fit yet waits in a per-team queue (no Pending pods). A service gets a 409 instead |
 | **Job registry** (SQLite) | Keeps job history after the CRs are deleted. It's the source for queue-time and cost metrics |
-| **Reconciler** | Background loop that syncs RayJob status into the registry with timestamps |
-| **KubeRay operator** | Turns `RayJob` / `RayService` CRs into Ray head and worker pods, and tears them down |
-| **Team namespaces** | `team-a`, `team-b`, … each with a `ResourceQuota` + `LimitRange` |
+| **Reconciler** | 5s loop: syncs RayJob status into the registry with timestamps, keeps the driver logs, deletes finished RayJobs, admits queued jobs |
+| **KubeRay operator** | Turns `RayJob` / `RayService` CRs into Ray head and worker pods, and tears them down. Heads start with `--no-monitor` (fixed-size worker groups) |
+| **Team namespaces** | `team-a`, `team-b`, … each with a `ResourceQuota` (CPU, memory, simulated GPU) + `LimitRange` |
 | **`/shared` (hostPath)** | Dataset cache and checkpoints, which outlive any pod |
-| **Prometheus + Grafana** | Ray metrics, API metrics, quota usage from kube-state-metrics |
+| **Prometheus + Grafana** | Optional (`make monitoring`). Ray metrics, API metrics, quota usage from kube-state-metrics |
 
 Editable sources for all diagrams: [`docs/diagrams/*.excalidraw`](docs/diagrams/). Open them at
 [excalidraw.com](https://excalidraw.com) or in the VS Code Excalidraw extension.
