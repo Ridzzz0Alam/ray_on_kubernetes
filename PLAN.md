@@ -147,7 +147,7 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 
 - [x] README: architecture diagram, a 5-minute quickstart (measured ~6 min), screenshots, results table
 - [ ] `docs/demos/*.md` for each acceptance demo
-- [ ] Turn the rough README case study into the full one: fill in §12 Results, remove 🚧 markers, add screenshots
+- [x] Turn the rough README case study into the full one: fill in §12 Results, remove 🚧 markers, add screenshots
 - [ ] Update the resume bullets (below) with real numbers, but only for features that were actually built.
       Drafts:
       - Built a self-service ML platform on Kubernetes (KubeRay) with a FastAPI submission API and Python SDK,

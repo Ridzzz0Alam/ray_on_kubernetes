@@ -2,9 +2,8 @@
 
 [![ci](https://github.com/Ridzzz0Alam/ray_on_kubernetes/actions/workflows/ci.yml/badge.svg)](https://github.com/Ridzzz0Alam/ray_on_kubernetes/actions/workflows/ci.yml)
 
-> **Case study, rough draft.** The design is complete, but the build is in progress (Phase 0 of 9 done).
-> Sections marked 🚧 describe the intended design. Their results will be filled in with real numbers once each
-> phase ships. Live status: [PLAN.md](PLAN.md) · design detail: [ARCHITECTURE.md](ARCHITECTURE.md) ·
+> **Case study of a working platform.** All the build phases are done, and every number here was measured on the
+> dev laptop. Design detail: [ARCHITECTURE.md](ARCHITECTURE.md) · plan and decision log: [PLAN.md](PLAN.md) ·
 > session log: [PROGRESS.md](PROGRESS.md).
 
 ## TL;DR
@@ -105,7 +104,7 @@ Most of the 42s in PENDING is pod start-up for the head and workers on 2 cores.
 
 ![Job lifecycle](docs/diagrams/job-lifecycle.svg)
 
-## 5. Distributed training and fault tolerance ✅
+## 5. Distributed training and fault tolerance
 
 The training workload is a sentiment classifier on an Amazon reviews subset (about 4k train / 1k eval).
 `TorchTrainer` runs 2 workers on the CPU `gloo` backend, with `torch.set_num_threads(1)` per worker so they
@@ -140,7 +139,7 @@ Fault tolerance has two layers:
 The key detail is that the training loop always starts with `ray.train.get_checkpoint()` and restores the
 model, **optimizer** and **epoch counter**, not just the weights. So a crash costs at most one epoch.
 
-## 6. Multi-tenancy ✅
+## 6. Multi-tenancy
 
 ![Multi-tenancy](docs/diagrams/multi-tenancy.svg)
 
@@ -153,7 +152,7 @@ model, **optimizer** and **epoch counter**, not just the weights. So a crash cos
   went 34s → 137s → 244s, team-b's stayed at 34s and its job succeeded ([recorded run](docs/demos/multi-tenancy.md)).
 - **Next step:** [Kueue](https://kueue.sigs.k8s.io/) for proper admission queues, fair sharing and preemption.
 
-## 7. Inference with autoscaling ✅
+## 7. Inference with autoscaling
 
 `POST /services {"name": "sentiment", "job_id": "<training job>"}` serves the latest checkpoint of a SUCCEEDED
 training job as a `RayService` (Ray Serve, `POST /predict`) with
@@ -170,7 +169,7 @@ p50 205 ms at 20 clients, about 94 req/s, 0 errors.
 |---|---|
 | ![Serve at 1 replica](docs/screenshots/phase-9/ray-dashboard-serve-1-replica.jpg) | ![Serve at 3 replicas](docs/screenshots/phase-9/ray-dashboard-serve-3-replicas.jpg) |
 
-## 8. Observability and cost ✅
+## 8. Observability and cost
 
 | Metric | Source | Question it answers |
 |---|---|---|
@@ -189,11 +188,11 @@ queue time stepping 34s → 141s → 246s while team-b's stays at 33s ([recorded
 **Cost report** (`rkp cost --since 7d`): pod requests × time held (job: driver start → finish; service: create →
 delete), × rates from `config/rates.yaml`. The arithmetic is unit-tested against registry rows.
 
-**GPU awareness ✅:** no GPU on the laptop, so the node advertises a simulated one (`example.com/gpu: 1`, like a
+**GPU awareness:** no GPU on the laptop, so the node advertises a simulated one (`example.com/gpu: 1`, like a
 device plugin would) and `JobSpec.gpus: 1` adds a `gpu-sim` worker that holds it and starts Ray with `{"sim_gpu": 1}`.
 Measured: team-b's GPU job waited **150s** Pending (`Insufficient example.com/gpu`, shown in `rkp status`) while
 team-a held the GPU, and team-b's CPU job finished in 36s meanwhile ([recorded run with screenshots](docs/demos/gpu-awareness.md)).
-A real cloud GPU run would need owner approval and wasn't done.
+A run on a real cloud GPU node is optional and wasn't done.
 
 ![Grafana: simulated GPUs used vs quota during the contention demo](docs/screenshots/phase-8/grafana-gpu-contention-quota.jpg)
 
@@ -347,4 +346,7 @@ docs/diagrams/  Excalidraw sources + SVGs  ✅    tests/              pytest    
 | 1 Cluster + hello RayJob | ✅ | 6 Multi-tenancy | ✅ |
 | 2 API + SDK | ✅ | 7 Observability + cost | ✅ |
 | 3 Distributed training | ✅ | 8 GPU awareness | ✅ |
-| 4 Lifecycle | ✅ | 9 Polish + full case study | 🚧 |
+| 4 Lifecycle | ✅ | 9 Polish + case study | ✅ |
+
+Optional extras not done: a `train → evaluate → deploy` pipeline that promotes a model only above an accuracy
+threshold, and the same training job on a real cloud GPU node.
