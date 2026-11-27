@@ -6,6 +6,24 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-27: Phase 9 started: `rkp serve` CLI
+
+**Done**
+- `rkp serve create NAME JOB_ID | status NAME | list | delete NAME` (`sdk/cli.py`). The SDK adds `Client.serve/service/services/unserve/watch_service`.
+- `create` retries only the 409 containing "retry in a few seconds" (`TRANSIENT_BUSY`), every 3s for up to `--retry-for` (default 120s).
+  Any other 409 or 422 fails at once. `--wait` (the default) follows DEPLOYING → RUNNING and exits 1 on UNHEALTHY.
+- 4 new CLI tests (110 unit tests in total). Live run on kind: 1-epoch tiny job SUCCEEDED in 110s, then `rkp serve create` reached
+  RUNNING in 45s, `/predict` → positive 0.926, then delete. That live run did **not** hit the 409 (the pods were already gone),
+  so the retry is covered by the unit test and the existing e2e test.
+- Docs: serving demo, README quickstart, ARCHITECTURE §3.2, PLAN Phase 9 checkbox + decision log.
+
+**State:** committed, not pushed. The cluster is deleted and nothing is running. `make test-k8s` was not re-run (no API change).
+
+**Next:** the rest of Phase 9: README architecture diagram, 5-minute quickstart, screenshots, results table, §12 Results, remove the 🚧 markers,
+and resume bullets with real numbers.
+
+---
+
 ## 2026-11-25: Phase 8 follow-ups (memory budget, quota hand-over gap). Session paused here
 
 **Done**
