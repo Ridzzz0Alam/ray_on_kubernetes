@@ -19,8 +19,9 @@ failures, and scales inference with load. All of it runs on the laptop above.
 The stack: kind, KubeRay, Ray Train / Ray Serve, PyTorch, FastAPI, SQLite, Prometheus, Grafana, uv,
 and GitHub Actions. The core ideas are one RayCluster per job, namespace-per-team quotas,
 checkpoint-first training, and metrics computed from the job registry rather than from live
-Kubernetes objects. The whole thing must fit inside roughly 3 CPUs and 7 GB of RAM — and it does,
-with about 0.1 GiB to spare at peak.
+Kubernetes objects. The whole thing must fit inside roughly 3 CPUs and 7 GiB of RAM — and it just
+about does: training peaks at 6.9 GiB, and turning monitoring on during training tips it to 7.01, which
+is why monitoring stays off for training runs.
 
 ---
 
@@ -66,6 +67,19 @@ The peak, measured without page cache, was 6.9 GiB for training, 7.01 GiB with m
 6.84 GiB for the full end-to-end test suite (which briefly runs three small clusters at once during
 the GPU test). The budget was ~7 GiB.
 
+![Memory budget breakdown](docs/diagrams/memory-budget.svg)
+
+The breakdown explains why the budget is tight. The Ray head is the single biggest line item, larger
+than both training workers combined, because it carries the driver, the Global Control Store, the
+dashboard and its agents whether the job is tiny or not. That is a fixed cost per Ray cluster, and it
+is why the platform runs one cluster at a time on this machine: a second job is not "one more model",
+it is another ~1.4–2.8 GiB head.
+
+Measuring memory honestly took some care. A container's raw memory usage includes the kernel's page
+cache, which balloons when the dataset is read and is reclaimable, so it overstates real pressure. The
+numbers here are `memory.current − active_file − inactive_file` from the node's cgroup: memory that
+actually has to fit, not cache the kernel would hand back under pressure.
+
 ## Architecture
 
 ![System architecture](docs/diagrams/architecture.svg)
@@ -91,10 +105,11 @@ The platform is a small set of components, each with one job:
 - **`/shared` hostPath** — dataset cache and checkpoints that outlive any pod.
 - **Prometheus + Grafana** — optional monitoring surfacing Ray metrics, API metrics, and quota usage.
 
-Two structural choices deserve emphasis. First, the API — not the user — owns every Kubernetes
-object: the submitter pod, the code ConfigMap and the RayJob all carry owner references, so when
-the reconciler deletes the finished RayJob, everything downstream is garbage-collected by the
-cluster itself. Second, nothing durable lives in Kubernetes: CRs are working state, and the registry
+Two structural choices deserve emphasis. First, the API — not the user — creates every Kubernetes
+object, and the RayJob is the root of everything a job owns: the code ConfigMap carries an owner
+reference to its RayJob, and KubeRay owns the RayCluster and the submitter it creates. So when the
+reconciler deletes a finished RayJob, everything downstream is garbage-collected by the cluster
+itself. Second, nothing durable lives in Kubernetes: CRs are working state, and the registry
 is the record. That split is what makes queue-time and cost metrics possible after the CRs are gone.
 
 ## How a job flows
@@ -132,7 +147,7 @@ Step by step:
 5. When the job ends, the reconciler copies the driver logs into SQLite and deletes the RayJob;
    owner references remove the cluster, the submitter and the code ConfigMap.
 
-Most of the 42 seconds spent in PENDING is pod start-up for the head and workers on two cores. That
+Most of the 40 seconds spent in PENDING is pod start-up for the head and workers on two cores. That
 is the price of the one-cluster-per-job decision, and it is paid once per job, not per epoch.
 
 ## Distributed training and fault tolerance
@@ -158,6 +173,17 @@ $ rkp logs <id> | grep 'rank 0'
 Mid-run, the Ray dashboard shows both workers at about 97% CPU each, with the head holding the
 driver — two physical cores, two busy workers, nothing left on the table.
 
+Where does the time go? Breaking one recorded run down from the registry timestamps and the
+per-epoch log lines:
+
+![Where a training job's time goes](docs/diagrams/job-timing.svg)
+
+About a quarter of the job is Ray cluster start-up, before any user code runs. That's the bill for
+one RayCluster per job, and it's the main argument for the alternative, a long-lived shared cluster.
+On this hardware the trade is worth it: the start-up buys complete isolation and nothing idling
+between jobs. On a busy production cluster with short jobs the balance shifts, and warm pools or a
+shared cluster with per-team Ray namespaces start to look better.
+
 Fault tolerance has two layers:
 
 | Failure | Handled by | Effect |
@@ -171,10 +197,12 @@ Fault tolerance has two layers:
 The detail that makes this work is that the training loop always starts with
 `ray.train.get_checkpoint()` and restores the model, **optimizer**, and **epoch counter** — not just
 the weights. Restoring only the weights would silently rewind the learning-rate schedule and re-run
-finished epochs. Done this way, a crash costs at most one epoch, and the end-to-end test proves it:
-a worker killed mid-epoch restarted the group from the epoch-1 checkpoint and finished at 85.6%
-accuracy in about 2m50s, versus ~2m27s without the kill — roughly one lost epoch plus a restart,
-which is exactly the design claim.
+finished epochs. Done this way, a crash costs at most one epoch. The end-to-end suite checks the
+mechanism: it kills a worker pod once the first checkpoint exists and asserts that the job resumes
+from it and succeeds. A recorded chaos run measured the cost: the kill landed during epoch 2, rank 1
+saw a gloo "connection reset", Ray Train logged "Error count: 1 (max allowed: 3)", restarted the
+worker group from the epoch-1 checkpoint, and finished at 85.6% accuracy in about 2m50s, versus
+~2m27s without the kill. That's the partial epoch plus a restart, which is exactly the design claim.
 
 ## Admission control and multi-tenancy
 
@@ -185,7 +213,10 @@ rather than in the scheduler.
 
 **Isolation.** Every API call is scoped to the namespace of the caller's key, so team-b gets a 403
 on team-a's jobs. When the API runs in-cluster, RBAC limits its ServiceAccount to `ray.io` resources
-in `team-*` namespaces — so even a compromised API cannot touch anything else.
+in `team-*` namespaces, so even a compromised API couldn't touch anything else. One caveat: in this
+laptop setup the API runs on the host with the developer's kubeconfig, so that RBAC boundary is
+verified by `kubectl auth can-i --as` checks in the end-to-end suite rather than exercised by the
+running API.
 
 **Fairness.** Each team has a hard `ResourceQuota` (2 CPU / 4 GiB of requests), and the node is
 sized so the sum of the quotas is no more than allocatable. The interesting part is *how* the quota
@@ -205,7 +236,8 @@ anything:
 Usage is counted the way Kubernetes itself counts pods for quota: admitted work in the registry,
 plus the requests of pods that are still terminating for finished jobs or deleted services. That
 closes the hand-over gap — a finished job whose head pod is still terminating keeps its quota until
-the pod is really gone, so two jobs never briefly share one team's allocation.
+the pod is really gone, so two jobs never briefly share one team's allocation. (This wasn't the
+original design; how the gap was found is in "Lessons learned" below.)
 
 ![Multi-tenancy](docs/diagrams/multi-tenancy.svg)
 
@@ -229,9 +261,14 @@ A load test ramping from 1 to 20 concurrent clients showed replicas going **1 �
 back to 1 roughly 38 seconds after the load stopped. p50 latency was 12 ms with 1 client and
 205–210 ms with 20. Throughput was capped at about 90–94 req/s — and the interesting finding is
 *where* the cap is: the single Serve HTTP proxy, running at 100% of one core. The replicas were not
-saturated; the front door was. Scaling out the replica count would not have bought a single extra
-request per second on this hardware. A second run on a different day reproduced the result
-end-to-end: 1 → 3 → 1 (down after 40 s), p50 205 ms at 20 clients, ~94 req/s, zero errors.
+saturated; the front door was. During a 20-client burst the proxy actor sat at 100% of a core and the
+head container at 98% of its 1-CPU limit, while each replica used only 27–36%. Throughput stayed at
+roughly 80–95 req/s whether one replica or three were running, so the extra replicas absorbed queued
+requests rather than adding capacity. bert-tiny inference takes a few milliseconds, so a single
+Python proxy saturates first. Making replicas count would take heavier per-request work (DistilBERT, or
+`@serve.batch`), several proxies behind a real load balancer instead of a port-forward, and a head with
+more than one CPU. A second run on a different day reproduced the result end-to-end: 1 → 3 → 1 (down
+after 40 s), p50 205 ms at 20 clients, ~94 req/s, zero errors.
 
 | Idle: 1 replica | Under 20 clients: 3 replicas |
 |---|---|
@@ -316,7 +353,7 @@ that the cheap layers run everywhere and the expensive ones run only where they 
 | Integration | Submit / status / logs / cancel against kind | `make test-k8s` | ✅ |
 | Chaos | Kill a worker mid-epoch, assert resume from checkpoint | `scripts/chaos_kill_worker.sh`, run by `make test-k8s` | ✅ |
 | Tenancy | Noisy neighbour: team-b unaffected by team-a saturation, RBAC `can-i` checks | `scripts/noisy_neighbour.sh`, `make test-k8s` | ✅ |
-| Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py` (+ serve e2e in `make test-k8s`) | ✅ |
+| Load | Serve autoscaling 1 → 3 replicas under ramped load | `scripts/load_test.py`, run as a recorded demo (the serve e2e test covers deploy → predict → delete) | ✅ |
 
 That is 110 unit tests with no cluster needed and 17 end-to-end tests against kind in about 17
 minutes. CI (GitHub Actions) runs the static and unit layers on every push; the cluster layers run
@@ -344,7 +381,7 @@ All numbers are from real runs on the laptop (2 cores / 4 threads, 15 GB, no GPU
 | Serving | Replicas under a 1 → 20 client ramp | 1 → 3, back to 1 in 38–40s, 0 errors |
 | Serving | Latency / throughput | p50 12 ms (1 client) to 205–210 ms (20 clients); ~90–94 req/s |
 | Cost | `rkp cost` | CPU-hours, GB-hours and cost per team from pod requests × time held; unit-tested |
-| Footprint | Peak node RAM (without page cache) | 6.9 GiB training; 7.01 GiB with monitoring; budget ~7 GB |
+| Footprint | Peak node RAM (without page cache) | 6.9 GiB training; 7.01 GiB with monitoring; 6.84 GiB for the full e2e suite; budget ~7 GiB |
 | Getting started | Cluster up → train → serve → predict → cost | ~6 minutes after the one-time image build |
 | Tests | Unit / end-to-end | 110 unit tests + 17 end-to-end tests in ~17 min |
 
@@ -394,6 +431,51 @@ Everything is pinned — kind v0.33.0 (Kubernetes v1.37.0), kubectl v1.37.2, Hel
 output: [serving](docs/demos/serving.md), [multi-tenancy](docs/demos/multi-tenancy.md),
 [observability](docs/demos/observability.md), [GPU awareness](docs/demos/gpu-awareness.md).
 
+## Lessons learned: what broke along the way
+
+The finished numbers hide the bugs that got fixed on the way to them. These are the ones worth
+knowing about if you build something similar.
+
+**1. Two sources of truth for quota disagree for a few seconds.** The Admitter originally freed a
+job's quota the moment the reconciler deleted its RayJob. Kubernetes doesn't see it that way: the
+job's pods take a few seconds to terminate, and the `ResourceQuota` keeps counting them until they're
+gone. So the next job was admitted by the API and then had its pods refused by Kubernetes with
+"exceeded quota" events (`used: requests.memory=4040Mi, limited: 4Gi`). On the Grafana dashboard it
+showed up as "used" briefly touching the 4 GiB line.
+
+![The quota hand-over gap, and the fix](docs/diagrams/quota-handover.svg)
+
+The fix was to stop pretending the API knows better than the cluster. Usage is now the registry's
+admitted work *plus* the requests of pods still terminating for finished work, using the same rule
+Kubernetes' own pod quota evaluator uses: a pod stops counting once it has Succeeded or Failed, or is
+past its deletion grace period. The noisy-neighbour end-to-end test now asserts that no "exceeded
+quota" events happen. Without the fix it fails, and with it it passes. The visible side effect is the
+409 "retry in a few seconds" that `rkp serve create` retries.
+
+**2. A worker that's slightly too small doesn't fail, it hangs.** A Ray worker node's own processes
+(raylet, agents) take about 0.45 GB before any user code runs. At a 512Mi limit, a worker that
+actually ran tasks got killed by Ray's memory monitor, which retried the task, which got killed again.
+The job showed RUNNING indefinitely. Nothing crashed, so nothing alerted. Workers that run tasks now
+get at least 640Mi. The general lesson: on a tight memory budget, measure the framework's fixed cost
+per process before sizing anything.
+
+**3. Not everything can be switched off.** Starting heads with `--no-monitor` saved ~115 MB per head,
+because the autoscaler monitor does nothing with fixed-size worker groups. The obvious next trim, the
+unused Ray Client server (~112 MB), can't be done the same way: `--ray-client-server-port=0` crashes
+the head, because Ray only accepts ports 1024–65535. Some fixed costs are simply the price of the
+framework.
+
+**4. Patching a node's capacity isn't instant.** The simulated GPU is added by patching the node's
+status capacity, as a device plugin would. Allocatable only catches up on the kubelet's next status
+sync, 10–30 seconds later, and anything scheduled before that sees zero GPUs. `make gpu-sim` now
+waits until allocatable shows the GPU before returning.
+
+**5. The obvious metric can be the wrong one.** Summing `ray_serve_deployment_replica_healthy`
+undercounted the replicas, so the dashboard uses `ray_serve_autoscaling_target_replicas` for the
+replica count instead. Likewise, queue time uses Ray's own job start and finish timestamps rather than
+the moment the reconciler noticed a change, so it stays accurate even for jobs shorter than one
+5-second poll.
+
 ## What production would change
 
 The laptop-forced choices are explicit, and each has a named successor:
@@ -406,8 +488,10 @@ The laptop-forced choices are explicit, and each has a named successor:
   couple of list calls every five seconds; watches scale to thousands of jobs.
 - **Kueue with fair sharing and preemption** — the hand-rolled FIFO queue demonstrates the
   semantics but not the fairness policies.
-- **Separate CPU/GPU/spot node pools on a managed cluster** — with real devices behind the
-  `example.com/gpu` resource name the platform already knows how to schedule.
+- **Separate CPU/GPU/spot node pools on a managed cluster** — the scheduling, per-team GPU quota
+  and "why is it pending" status logic carry over; the simulated pieces get swapped for real ones
+  (`nvidia.com/gpu` from the NVIDIA device plugin instead of `example.com/gpu`, Ray's built-in `GPU`
+  resource instead of `sim_gpu`, and a CUDA build of the image).
 
 The trade-offs are documented rather than hidden, which is the real point of the exercise.
 
