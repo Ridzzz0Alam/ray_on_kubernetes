@@ -1,4 +1,4 @@
-# Building a Self-Service ML Platform on Kubernetes with Ray — on a Laptop
+# Building a Self-Service ML Platform on Kubernetes with Ray, on a Laptop
 
 > A case study of a working platform. Every phase is built, and every number in this article was
 > measured on the same machine: a 2-core, 15 GB, no-GPU laptop.
@@ -19,7 +19,7 @@ failures, and scales inference with load. All of it runs on the laptop above.
 The stack: kind, KubeRay, Ray Train / Ray Serve, PyTorch, FastAPI, SQLite, Prometheus, Grafana, uv,
 and GitHub Actions. The core ideas are one RayCluster per job, namespace-per-team quotas,
 checkpoint-first training, and metrics computed from the job registry rather than from live
-Kubernetes objects. The whole thing must fit inside roughly 3 CPUs and 7 GiB of RAM — and it just
+Kubernetes objects. The whole thing must fit inside roughly 3 CPUs and 7 GiB of RAM, and it just
 about does: training peaks at 6.9 GiB, and turning monitoring on during training tips it to 7.01, which
 is why monitoring stays off for training runs.
 
@@ -35,7 +35,7 @@ Shared-cluster ML work breaks down into four familiar pain points:
 4. **Opacity.** Nobody can report wait time, usage, or cost after the fact.
 
 The goal is straightforward: a platform that takes the scheduling, fault tolerance, isolation, and
-visibility off the team's plate — and proves, with tests and measured numbers, that it actually
+visibility off the team's plate, and proves, with tests and measured numbers, that it actually
 does so.
 
 ## Goals and constraints
@@ -53,7 +53,7 @@ does so.
 The hard constraint is the hardware: an i7-7500U (2 cores / 4 threads), 15 GB RAM, no GPU. That
 single fact shaped most of the decisions:
 
-- A **single-node kind cluster** — no worker nodes, no multi-node scheduling to demo or pay for.
+- A **single-node kind cluster**: no worker nodes, no multi-node scheduling to demo or pay for.
 - **One Ray cluster at a time.** Training *or* serving, not both, unless a demo specifically needs
   multi-tenancy.
 - A **tiny default model** (`prajjwal1/bert-tiny`, about 4M parameters) so a training iteration
@@ -86,26 +86,26 @@ actually has to fit, not cache the kernel would hand back under pressure.
 
 The platform is a small set of components, each with one job:
 
-- **`rkp` CLI / SDK** — a thin HTTP client exposing `submit`, `status`, `logs`, `cancel`, `list`,
+- **`rkp` CLI / SDK**: a thin HTTP client exposing `submit`, `status`, `logs`, `cancel`, `list`,
   `cost`, and `serve` commands.
-- **platform_api (FastAPI)** — maps an API key to a team and namespace, builds Ray custom resources
+- **platform_api (FastAPI)**: maps an API key to a team and namespace, builds Ray custom resources
   from a validated `JobSpec`, ships the user's code in a ConfigMap, and serves `/metrics` and
   `/cost`.
-- **Admission** — checks each job or service against the team's `ResourceQuota` *before* creating
+- **Admission**: checks each job or service against the team's `ResourceQuota` *before* creating
   anything. A job that doesn't fit waits in a per-team queue rather than producing Pending pods; a
   service gets a 409 instead.
-- **Job registry (SQLite)** — keeps job history after the custom resources are deleted, and is the
+- **Job registry (SQLite)**: keeps job history after the custom resources are deleted, and is the
   source of queue-time and cost metrics.
-- **Reconciler** — a 5-second loop that syncs RayJob status into the registry with timestamps, keeps
+- **Reconciler**: a 5-second loop that syncs RayJob status into the registry with timestamps, keeps
   driver logs, deletes finished RayJobs, and admits queued jobs.
-- **KubeRay operator** — turns `RayJob` / `RayService` resources into Ray head and worker pods and
+- **KubeRay operator**: turns `RayJob` / `RayService` resources into Ray head and worker pods and
   tears them down.
-- **Team namespaces** — each team gets a `ResourceQuota` (CPU, memory, simulated GPU) and a
+- **Team namespaces**: each team gets a `ResourceQuota` (CPU, memory, simulated GPU) and a
   `LimitRange`.
-- **`/shared` hostPath** — dataset cache and checkpoints that outlive any pod.
-- **Prometheus + Grafana** — optional monitoring surfacing Ray metrics, API metrics, and quota usage.
+- **`/shared` hostPath**: dataset cache and checkpoints that outlive any pod.
+- **Prometheus + Grafana**: optional monitoring surfacing Ray metrics, API metrics, and quota usage.
 
-Two structural choices deserve emphasis. First, the API — not the user — creates every Kubernetes
+Two structural choices deserve emphasis. First, the API (not the user) creates every Kubernetes
 object, and the RayJob is the root of everything a job owns: the code ConfigMap carries an owner
 reference to its RayJob, and KubeRay owns the RayCluster and the submitter it creates. So when the
 reconciler deletes a finished RayJob, everything downstream is garbage-collected by the cluster
@@ -137,13 +137,13 @@ error: HTTP 403: job <id> belongs to another team
 Step by step:
 
 1. The CLI sends the spec to `POST /jobs` with the team's API key.
-2. The API resolves the key to a team and namespace — **never from the request body**, so a caller
+2. The API resolves the key to a team and namespace, **never from the request body**, so a caller
    cannot place work in someone else's namespace by asking nicely. It validates the `JobSpec` and
    writes a `SUBMITTED` row.
 3. The API creates a `RayJob` in the team's namespace. KubeRay starts a RayCluster (head plus
    workers), runs the entrypoint, then shuts the cluster down (`shutdownAfterJobFinishes`).
 4. The reconciler records each state change. Queue time is defined as `started_at − submitted_at`,
-   using Ray's own start timestamp — not an API-side guess — so it reflects real scheduling delay.
+   using Ray's own start timestamp (not an API-side guess), so it reflects real scheduling delay.
 5. When the job ends, the reconciler copies the driver logs into SQLite and deletes the RayJob;
    owner references remove the cluster, the submitter and the code ConfigMap.
 
@@ -171,7 +171,7 @@ $ rkp logs <id> | grep 'rank 0'
 ![Ray dashboard during training: head + 2 workers](docs/screenshots/phase-9/ray-dashboard-training-nodes.jpg)
 
 Mid-run, the Ray dashboard shows both workers at about 97% CPU each, with the head holding the
-driver — two physical cores, two busy workers, nothing left on the table.
+driver: two physical cores, two busy workers, nothing left on the table.
 
 Where does the time go? Breaking one recorded run down from the registry timestamps and the
 per-epoch log lines:
@@ -195,7 +195,7 @@ Fault tolerance has two layers:
 ![Fault tolerance](docs/diagrams/fault-tolerance.svg)
 
 The detail that makes this work is that the training loop always starts with
-`ray.train.get_checkpoint()` and restores the model, **optimizer**, and **epoch counter** — not just
+`ray.train.get_checkpoint()` and restores the model, **optimizer**, and **epoch counter**, not just
 the weights. Restoring only the weights would silently rewind the learning-rate schedule and re-run
 finished epochs. Done this way, a crash costs at most one epoch. The end-to-end suite checks the
 mechanism: it kills a worker pod once the first checkpoint exists and asserts that the job resumes
@@ -224,7 +224,7 @@ is enforced. The Admitter checks `used + new request` against the quota **before
 anything:
 
 - A job that fits is admitted immediately and becomes a RayJob.
-- A job that doesn't fit **yet** is stored `QUEUED` in the registry — a FIFO per-team queue with no
+- A job that doesn't fit **yet** is stored `QUEUED` in the registry: a FIFO per-team queue with no
   Kubernetes objects involved, hence no Pending pods squatting on the cluster. The reconciler
   admits the first queued job as soon as usage drops.
 - A job bigger than the team's whole quota can never fit, so it gets a 422 **with the numbers** and
@@ -235,7 +235,7 @@ anything:
 
 Usage is counted the way Kubernetes itself counts pods for quota: admitted work in the registry,
 plus the requests of pods that are still terminating for finished jobs or deleted services. That
-closes the hand-over gap — a finished job whose head pod is still terminating keeps its quota until
+closes the hand-over gap: a finished job whose head pod is still terminating keeps its quota until
 the pod is really gone, so two jobs never briefly share one team's allocation. (This wasn't the
 original design; how the gap was found is in "Lessons learned" below.)
 
@@ -243,7 +243,7 @@ original design; how the gap was found is in "Lessons learned" below.)
 
 The noisy-neighbour demo floods team-a, then submits a single team-b job. Measured: team-a's own
 queue time went 34s → 137s → 244s as its queue backed up behind its quota, while team-b's stayed at
-34s — the same as on an idle cluster — and its job succeeded. The flood cost the attacker's team
+34s (the same as on an idle cluster), and its job succeeded. The flood cost the attacker's team
 its own latency and nobody else's. The natural next step is [Kueue](https://kueue.sigs.k8s.io/) for
 proper admission queues, fair sharing and preemption.
 
@@ -259,7 +259,7 @@ service counts against the team quota like any other work.
 
 A load test ramping from 1 to 20 concurrent clients showed replicas going **1 → 3** under load and
 back to 1 roughly 38 seconds after the load stopped. p50 latency was 12 ms with 1 client and
-205–210 ms with 20. Throughput was capped at about 90–94 req/s — and the interesting finding is
+205–210 ms with 20. Throughput was capped at about 90–94 req/s, and the interesting finding is
 *where* the cap is: the single Serve HTTP proxy, running at 100% of one core. The replicas were not
 saturated; the front door was. During a 20-client burst the proxy actor sat at 100% of a core and the
 head container at 98% of its 1-CPU limit, while each replica used only 27–36%. Throughput stayed at
@@ -275,7 +275,7 @@ after 40 s), p50 205 ms at 20 clients, ~94 req/s, zero errors.
 | ![Serve at 1 replica](docs/screenshots/phase-9/ray-dashboard-serve-1-replica.jpg) | ![Serve at 3 replicas](docs/screenshots/phase-9/ray-dashboard-serve-3-replicas.jpg) |
 
 Creating a service takes 30–45 seconds from `POST /services` to RUNNING, most of it KubeRay
-starting the head and worker pods — the same per-job start-up cost as training, paid once per
+starting the head and worker pods, the same per-job start-up cost as training, paid once per
 service.
 
 ## Observability and cost
@@ -290,7 +290,7 @@ service.
 | `ray_node_cpu_utilization`, Serve QPS / replicas | Ray | Are workers busy, and is autoscaling working? |
 | `kube_resourcequota{namespace}` | kube-state-metrics | How close is each team to its quota? |
 
-The API's metrics are computed from the job registry at scrape time — a deliberate choice, since the
+The API's metrics are computed from the job registry at scrape time (a deliberate choice), since the
 custom resources are deleted after jobs finish. Prometheus scrapes the API, Ray and
 kube-state-metrics; Grafana shows the `rkp platform` dashboard. After the noisy-neighbour demo, the
 dashboard shows team-a's queue time stepping 34s → 141s → 246s while team-b's stays at 33s:
@@ -298,8 +298,8 @@ dashboard shows team-a's queue time stepping 34s → 141s → 246s while team-b'
 ![Grafana: queue time per team during the noisy-neighbour demo](docs/screenshots/phase-7/grafana-noisy-neighbour-queueing.jpg)
 
 **Cost** is where the registry earns its keep. `rkp cost --since 7d` computes pod requests × time
-held — for a job, from driver start to finish; for a service, from create to delete — multiplied by
-rates from a config file. From the recorded quickstart hour:
+held (for a job, from driver start to finish; for a service, from create to delete) multiplied
+by rates from a config file. From the recorded quickstart hour:
 
 ```console
 TEAM        JOBS  SVCS  CPU-HOURS   GB-HOURS       COST
@@ -317,7 +317,7 @@ fake one (`example.com/gpu: 1`, exactly like a device plugin would), and `JobSpe
 scheduling behaviour is real even though the device is not: team-b's GPU job sat Pending for
 **150 seconds** (`Insufficient example.com/gpu`, shown in `rkp status`) while team-a held the only
 GPU, and team-b's CPU job finished in 36s meanwhile. What the demo shows is the *contention
-mechanics* — exclusive device scheduling, quota accounting per team, and a status message that
+mechanics*: exclusive device scheduling, quota accounting per team, and a status message that
 tells the user why the job is waiting.
 
 ![Grafana: simulated GPUs used vs quota during the contention demo](docs/screenshots/phase-8/grafana-gpu-contention-quota.jpg)
@@ -326,7 +326,7 @@ tells the user why the job is waiting.
 
 | Decision | Alternative | Why |
 |---|---|---|
-| **One RayCluster per job** (RayJob) | One long-lived shared Ray cluster | Clean isolation, per-job sizing, nothing idling — at the cost of cluster start-up per job |
+| **One RayCluster per job** (RayJob) | One long-lived shared Ray cluster | Clean isolation, per-job sizing, nothing idling; at the cost of cluster start-up per job |
 | **API in front of K8s** | Give teams kubectl access | Enforces team scoping, hides YAML, keeps history |
 | **SQLite registry** | Read state from custom resources only | Resources are deleted after jobs finish; queue time and cost need durable timestamps |
 | **hostPath checkpoints** | MinIO / S3 | Equivalent on a single node and saves ~500 MB RAM; production would be S3 / GCS |
@@ -358,7 +358,7 @@ that the cheap layers run everywhere and the expensive ones run only where they 
 That is 110 unit tests with no cluster needed and 17 end-to-end tests against kind in about 17
 minutes. CI (GitHub Actions) runs the static and unit layers on every push; the cluster layers run
 locally, because a kind cluster with Ray needs more than CI runners comfortably provide. The one
-deliberately *not* automated claim is latency — the load test records it, but asserting hard p50
+deliberately *not* automated claim is latency: the load test records it, but asserting hard p50
 thresholds on a 2-core laptop that is also running the cluster would be testing the laptop, not the
 platform.
 
@@ -426,8 +426,8 @@ What you should see at the end:
 {"predictions":[{"label":"positive","score":0.9262}],"checkpoint":"checkpoint_2026-11-27_10-08-24.977867"}
 ```
 
-Everything is pinned — kind v0.33.0 (Kubernetes v1.37.0), kubectl v1.37.2, Helm v4.3.1, KubeRay
-1.7.2, Ray 2.59.0 (Python 3.12) — and a test fails if any of those float. Recorded demos with raw
+Everything is pinned: kind v0.33.0 (Kubernetes v1.37.0), kubectl v1.37.2, Helm v4.3.1, KubeRay
+1.7.2, Ray 2.59.0 (Python 3.12). A test fails if any of those float. Recorded demos with raw
 output: [serving](docs/demos/serving.md), [multi-tenancy](docs/demos/multi-tenancy.md),
 [observability](docs/demos/observability.md), [GPU awareness](docs/demos/gpu-awareness.md).
 
@@ -480,15 +480,15 @@ the moment the reconciler noticed a change, so it stays accurate even for jobs s
 
 The laptop-forced choices are explicit, and each has a named successor:
 
-- **S3/GCS checkpoints** — the hostPath is only equivalent on a single node; on a multi-node
+- **S3/GCS checkpoints**: the hostPath is only equivalent on a single node; on a multi-node
   cluster it would silently break.
-- **OIDC instead of API keys** — real users have real identities; keys don't survive them.
-- **Postgres instead of SQLite** — one writer is fine for one API pod, and nothing else.
-- **A watch-based controller instead of the 5s polling loop** — polling is simple and costs a
+- **OIDC instead of API keys**: real users have real identities; keys don't survive them.
+- **Postgres instead of SQLite**: one writer is fine for one API pod, and nothing else.
+- **A watch-based controller instead of the 5s polling loop**: polling is simple and costs a
   couple of list calls every five seconds; watches scale to thousands of jobs.
-- **Kueue with fair sharing and preemption** — the hand-rolled FIFO queue demonstrates the
+- **Kueue with fair sharing and preemption**: the hand-rolled FIFO queue demonstrates the
   semantics but not the fairness policies.
-- **Separate CPU/GPU/spot node pools on a managed cluster** — the scheduling, per-team GPU quota
+- **Separate CPU/GPU/spot node pools on a managed cluster**: the scheduling, per-team GPU quota
   and "why is it pending" status logic carry over; the simulated pieces get swapped for real ones
   (`nvidia.com/gpu` from the NVIDIA device plugin instead of `example.com/gpu`, Ray's built-in `GPU`
   resource instead of `sim_gpu`, and a CUDA build of the image).
@@ -497,6 +497,6 @@ The trade-offs are documented rather than hidden, which is the real point of the
 
 ---
 
-The full design, plan and decision log, session log, and recorded demos — serving, multi-tenancy,
-observability, and GPU awareness — accompany the source, along with a quickstart that trains,
+The full design, plan and decision log, session log, and recorded demos (serving, multi-tenancy,
+observability, and GPU awareness) accompany the source, along with a quickstart that trains,
 serves, and prices a model in about six minutes.
