@@ -148,12 +148,28 @@ Done before Phase 5 because Phase 7's dashboard needs this demo's data.
 - [x] README: architecture diagram, a 5-minute quickstart (measured ~6 min), screenshots, results table
 - [ ] `docs/demos/*.md` for each acceptance demo
 - [x] Turn the rough README case study into the full one: fill in §12 Results, remove 🚧 markers, add screenshots
-- [ ] Update the resume bullets (below) with real numbers, but only for features that were actually built.
-      Drafts:
-      - Built a self-service ML platform on Kubernetes (KubeRay) with a FastAPI submission API and Python SDK,
-        running distributed PyTorch training with Ray Train and autoscaled inference with Ray Serve.
-      - Implemented checkpointing, automatic retries, cancellation and per-team resource quotas, recovering
-        training from worker failures, with Prometheus/Grafana dashboards for job and resource usage.
+- [x] Update the resume bullets (below) with real numbers, but only for features that were actually built.
+      Every number is from README §12. Two-bullet version:
+      - Built a self-service ML platform on Kubernetes (KubeRay) with a FastAPI submission API and Python SDK/CLI,
+        running distributed PyTorch training with Ray Train (85.3% accuracy in ~2 min on a 2-core laptop) and
+        autoscaled inference with Ray Serve (1 → 3 replicas under load, 0 errors).
+      - Implemented checkpoint/resume, automatic retries, cancellation and quota-aware per-team admission: a worker
+        killed mid-epoch cost only that partial epoch, and a noisy neighbour left the other team's queue time at its
+        34s baseline. Added Prometheus/Grafana dashboards and a per-team cost report.
+      Longer version (pick what fits):
+      - Built a self-service ML platform on Kubernetes (kind + KubeRay): teams submit distributed PyTorch training
+        (Ray Train) and inference services (Ray Serve) through a FastAPI API and a Python SDK/CLI, each run in the
+        team's own namespace.
+      - Made training fault-tolerant with per-epoch checkpoints (model, optimizer, epoch), automatic retries and
+        cancellation. A worker killed mid-epoch cost only that partial epoch, checked by a chaos test in a
+        17-test end-to-end suite.
+      - Isolated teams with namespace ResourceQuotas and quota-aware admission with a per-team queue. While one team
+        flooded its quota, the other team's queue time stayed at its 34s baseline, and simulated-GPU scheduling held a
+        contended GPU job Pending until the GPU freed up.
+      - Served models with Ray Serve autoscaling (1 → 3 → 1 replicas over a 1-to-20-client ramp, 0 errors) and
+        traced the ~94 req/s ceiling to the single HTTP proxy, not the replicas.
+      - Added Prometheus/Grafana dashboards and a per-team cost report (CPU-hours, GB-hours) built from a SQLite job
+        registry. The whole stack runs on a 2-core, 15 GB laptop (peak 6.84 GiB with 3 Ray clusters at once).
 - [ ] (Stretch) Flyte or a simple `train → evaluate → deploy` pipeline that promotes a model only if accuracy ≥ the threshold
 
 ---
