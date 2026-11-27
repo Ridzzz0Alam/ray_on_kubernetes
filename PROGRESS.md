@@ -28,8 +28,17 @@ reconciler read-back (status, logs, pod requests), code ConfigMap, simulated GPU
 inside one worker pod, read-only checkpoint loading, optional monitoring. README §3 table updated. To check the layout, render to PNG with
 `google-chrome --headless=new --screenshot=out.png --window-size=1250,900 file://$PWD/docs/diagrams/architecture.svg` (no rsvg-convert here).
 
-**Next:** the rest of Phase 9: screenshots, results table, §12 Results, remove the 🚧 markers and the stale
-"Phase 0 of 9 done" banner, and resume bullets with real numbers.
+**Screenshots + results table.** 5 Ray dashboard shots in `docs/screenshots/phase-9/` (training nodes, training job, Serve at 1 and 3 replicas,
+replica actors). README §5/§7/§8 now embed screenshots (§8 reuses Phase 7/8 Grafana shots). §12 Results is a full table, every number from a
+recorded run. Re-measured today: 2-epoch training 2m13s submit → SUCCEEDED, 85.3% again (same in 3 runs); serving RUNNING in 30s;
+load test 1 → 3 → 1 (down after 40s), p50 12 → 205 ms, ~94 req/s, 0 errors. PLAN's README checkbox is ticked.
+
+**Next:** the rest of Phase 9: remove the remaining 🚧 markers and the stale "Phase 0 of 9 done" banner (case-study pass), then the resume bullets.
+
+**Screenshot gotchas:** the Claude-in-Chrome browser can't reach this laptop's localhost. `google-chrome --screenshot` captures the Ray dashboard
+blank (it fires before React renders), and `#/train` is blank in Ray 2.59. What works: launch headless Chrome with `--remote-debugging-port`,
+navigate over CDP, wait ~8s, then `Page.captureScreenshot` (Node 24 has `fetch` and `WebSocket` built in). Crop by loading the PNG in a page
+sized to the crop and capturing as JPEG. There's no PIL or ImageMagick here.
 
 ---
 
