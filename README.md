@@ -19,6 +19,8 @@ failures and scales inference with load. All of it runs on a **2-core, 15 GB, no
 | **Core ideas** | one RayCluster per job, namespace-per-team quotas, checkpoint-first training, metrics from the job registry |
 | **Constraint** | whole stack ≤ ~3 CPU / ~7 GB RAM |
 
+**Try it:** the [quickstart](#quickstart-about-6-minutes-after-the-one-time-image-build) trains, serves and prices a model in about 6 minutes.
+
 ---
 
 ## 1. The problem
@@ -194,39 +196,78 @@ A real cloud GPU run would need owner approval and wasn't done.
 
 ## 10. Running it
 
+### Quickstart (about 6 minutes after the one-time image build)
+
 **Prerequisites:** Linux/macOS, Docker, [uv](https://docs.astral.sh/uv/), about 8 GB free RAM.
+
+One-time setup:
 
 ```bash
 git clone git@github.com:Ridzzz0Alam/ray_on_kubernetes.git && cd ray_on_kubernetes
-make tools   # pinned kind / kubectl / helm → ~/.local/bin (sha256-verified)
-make sync    # Python 3.12 env from uv.lock
-make check   # lint + unit tests
+make tools sync   # pinned kind / kubectl / helm → ~/.local/bin, Python 3.12 env from uv.lock
+make image        # Ray runtime image with CPU torch baked in (the slow step, first time only)
+make data         # tokenized data subset + bert-tiny → .shared/data (the only step that hits the network)
 ```
 
-Cluster + hello-world RayJob (Phase 1):
+Bring the platform up (3m07s measured: kind cluster, KubeRay operator, image load, team namespaces and quotas):
 
 ```bash
-make image       # build the Ray runtime image (~3 min first time); kind-loads it if the cluster is up
-make up          # single-node kind cluster + KubeRay operator; loads the image if built
-make hello       # 2-worker RayJob → SUCCEEDED, RayCluster torn down 30s after
-make down        # delete the cluster
+make up teams keys   # keys: dev API keys for team-a / team-b in config/ (git-ignored)
+make api             # platform API on 127.0.0.1:8000; leave it running and use a second terminal
 ```
 
-API + CLI (Phase 2):
+Train, serve, predict and see the cost (176s measured):
 
 ```bash
-make teams       # team-a / team-b namespaces, quotas, LimitRanges, API RBAC
-make data        # training data + model → .shared/data (once; PROFILE=distilbert for the big one)
-make keys        # dev API keys → config/api_keys.yaml (server) + config/rkp.toml (CLI), git-ignored
-make api         # platform API on 127.0.0.1:8000, in another terminal
-uv run rkp submit --team team-a workloads/hello.py    # see §4
-uv run rkp serve create sentiment <job-id> -t team-a  # serve a trained checkpoint (docs/demos/serving.md)
+JOB=$(uv run rkp submit -t team-a workloads/train --script train.py -- --profile tiny --epochs 1)
+uv run rkp logs $JOB -t team-a | grep -F '[rank 0] {' | tail -1
+uv run rkp serve create sentiment $JOB -t team-a
+kubectl --context kind-rkp -n team-a port-forward svc/rkp-svc-sentiment-serve-svc 8001:8000 &
+curl -s localhost:8001/predict -d '{"text": "Great product, works perfectly."}'
+uv run rkp cost --since 1h
+uv run rkp serve delete sentiment -t team-a
+make down            # delete the cluster (stop make api with Ctrl-C)
+```
+
+What you should see (recorded 2026-11-27 on the dev laptop):
+
+```console
+[    0s] SUBMITTED
+[    4s] PENDING
+[   40s] RUNNING
+[  135s] SUCCEEDED  (Job finished successfully.)
+(RayTrainWorker pid=131, ip=10.244.0.7) [rank 0] {'epoch': 1, 'train_loss': 0.5209, 'eval_loss': 0.3632, 'eval_accuracy': 0.849, 'epoch_seconds': 53.5}
+sentiment
+[    0s] DEPLOYING
+[   35s] RUNNING
+POST http://rkp-svc-sentiment-serve-svc.team-a.svc:8000/predict
+{"predictions":[{"label":"positive","score":0.9262}],"checkpoint":"checkpoint_2026-11-27_10-08-24.977867"}
+usage over the last 1h (requests x time; rates from config/rates.yaml)
+TEAM        JOBS  SVCS  CPU-HOURS   GB-HOURS       COST
+team-a         2     2      0.089      0.204     0.0025 USD
+team-b         0     0      0.000      0.000     0.0000 USD
+total                       0.089      0.204     0.0025 USD
+sentiment DELETED
+```
+
+`rkp serve create` retries for up to 2 minutes if the training job's pods are still releasing quota, then waits until
+the service is RUNNING. The cost rows above include an earlier run in the same hour.
+
+### More commands
+
+```bash
+make check       # lint + unit tests, no cluster needed (what CI runs)
+make hello       # Phase 1 smoke test: a raw 2-worker RayJob, no API
+uv run rkp list -t team-a / status <id> / cancel <id> / serve list   # see §4 and `uv run rkp --help`
 make monitoring  # minimal Prometheus + Grafana (~0.3 GB idle); make monitoring-down before long training runs
 make grafana     # dashboard on http://127.0.0.1:3000/d/rkp
-uv run rkp cost --since 7d                          # CPU-hours, GB-hours and cost per team
-make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC, serving (~14 min)
-make down        # tear everything down
+make test-k8s    # end-to-end against kind: submit/logs/cancel, worker-kill resume, retries, quotas + RBAC,
+                 # serving, GPU contention (~17 min)
+make help        # every target
 ```
+
+Demos with recorded output: [serving](docs/demos/serving.md), [multi-tenancy](docs/demos/multi-tenancy.md),
+[observability](docs/demos/observability.md), [GPU awareness](docs/demos/gpu-awareness.md).
 
 Pinned versions live in [`infra/versions.env`](infra/versions.env): kind v0.33.0 (K8s v1.37.0),
 kubectl v1.37.2, Helm v4.3.1, KubeRay 1.7.2, Ray 2.59.0 (Python 3.12).

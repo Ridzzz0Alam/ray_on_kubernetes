@@ -19,8 +19,12 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 **State:** committed, not pushed. The cluster is deleted and nothing is running. `make test-k8s` was not re-run (no API change).
 
-**Next:** the rest of Phase 9: README architecture diagram, 5-minute quickstart, screenshots, results table, §12 Results, remove the 🚧 markers,
-and resume bullets with real numbers.
+**Later the same day: README quickstart.** README §10 now opens with a linear quickstart (setup, train, serve, predict, cost, teardown)
+with real output, and the old phase-by-phase list became "More commands". Measured: `make up teams keys` 3m07s, train → serve → predict → cost 176s.
+The first `make image` build was not timed (the image already existed). `make keys` is now a no-op when both key files exist, so the quickstart can be re-run.
+
+**Next:** the rest of Phase 9: README architecture diagram, screenshots, results table, §12 Results, remove the 🚧 markers and the stale
+"Phase 0 of 9 done" banner, and resume bullets with real numbers.
 
 ---
 
