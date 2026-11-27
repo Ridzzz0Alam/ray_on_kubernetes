@@ -275,8 +275,8 @@ after 40 s), p50 205 ms at 20 clients, ~94 req/s, zero errors.
 | ![Serve at 1 replica](docs/screenshots/phase-9/ray-dashboard-serve-1-replica.jpg) | ![Serve at 3 replicas](docs/screenshots/phase-9/ray-dashboard-serve-3-replicas.jpg) |
 
 Creating a service takes 30–45 seconds from `POST /services` to RUNNING, most of it KubeRay
-starting the head and worker pods, the same per-job start-up cost as training, paid once per
-service.
+starting the head and worker pods. That is the same per-job start-up cost as training, paid once
+per service.
 
 ## Observability and cost
 
