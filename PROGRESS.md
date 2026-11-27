@@ -6,6 +6,24 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-27: ARTICLE.md review: lessons learned, 3 more diagrams, fact fixes
+
+**Done**
+- New diagrams: `job-timing` (where a 2-epoch job's 2m13s goes: 33s cluster start-up + 100s driver, epochs 33.8s + 35.4s),
+  `memory-budget` (6.9 GiB tiny-training peak: head 2.76 + 2 × 1.33 + ~1.5 the rest; 7.01 with monitoring), and `quota-handover`
+  (the bug and its fix, before/after). The testing diagram now says what the e2e suite really covers (serve = deploy → predict → delete,
+  not autoscaling; only the chaos script runs inside it) and that CI runs three layers, not two.
+- ARTICLE.md: a "Lessons learned" section (quota hand-over gap, the 512Mi worker hang, the unremovable Ray Client server, the extended-resource
+  sync delay, misleading metrics), a memory section, a timing section, and the proxy-bottleneck numbers.
+- Corrected: "fits with 0.1 GiB to spare" (true only with monitoring off), owner references (only the code ConfigMap carries one, to
+  its RayJob), "40s in PENDING" (was 42), "the e2e test proves 85.6%" (that was the recorded chaos run), the RBAC claim (dev API uses the
+  host kubeconfig), "no extra req/s from more replicas" (80–95 req/s at 1 or 3), and the GPU production line (needs `nvidia.com/gpu`
+  and Ray's `GPU`, not "already knows").
+
+**State:** committed. The cluster is down.
+
+---
+
 ## 2026-11-27: four new diagrams + ARTICLE.md case study
 
 **Done**
