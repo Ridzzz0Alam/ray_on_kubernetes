@@ -1,4 +1,4 @@
-"""`rkp` CLI: submit | status | logs | cancel | list | cost."""
+"""`rkp` CLI: submit | status | logs | cancel | list | cost | serve {create,status,list,delete}."""
 
 from __future__ import annotations
 
@@ -142,6 +142,85 @@ def cost(
         gb = sum(r["gb_hours"] for r in reports)
         total = sum(r["cost"] for r in reports)
         typer.echo(f"{'total':10} {'':>5} {'':>5} {cpu:>10.3f} {gb:>10.3f} {total:>10.4f} {cur}")
+
+
+serve_app = typer.Typer(help="Serve a trained checkpoint with Ray Serve.", no_args_is_help=True)
+app.add_typer(serve_app, name="serve")
+
+
+def _print_service(svc: dict) -> None:
+    for key in ("name", "team", "job_id", "state", "message", "endpoint", "created_at"):
+        typer.echo(f"{key:11} {svc.get(key) or '-'}")
+
+
+@serve_app.command("create")
+def serve_create(
+    name: Annotated[str, typer.Argument(help="Service name, unique within the team")],
+    job_id: Annotated[str, typer.Argument(help="SUCCEEDED training job whose checkpoint to serve")],
+    team: TeamOpt = None,
+    profile: Annotated[str, typer.Option(help="Model profile: tiny | distilbert")] = "tiny",
+    min_replicas: Annotated[int, typer.Option(min=1, max=4)] = 1,
+    max_replicas: Annotated[int, typer.Option(min=1, max=4)] = 3,
+    workers: Annotated[int, typer.Option(min=1, max=2)] = 1,
+    cpu: Annotated[int, typer.Option(min=1, max=2, help="Ray CPUs per worker")] = 2,
+    memory: Annotated[str, typer.Option(help="Memory per worker")] = "2Gi",
+    retry_for: Annotated[
+        float, typer.Option(min=0, help="Seconds to retry while finished work frees quota")
+    ] = 120,
+    wait: Annotated[bool, typer.Option("--wait/--no-wait", help="Follow until RUNNING")] = True,
+) -> None:
+    """Deploy a service; exits non-zero unless it ends up RUNNING (with --wait)."""
+    client = _client(team)
+    svc = client.serve(
+        name,
+        job_id,
+        retry_for=retry_for,
+        on_retry=lambda msg: typer.secho(f"quota busy, retrying: {msg}", fg="yellow", err=True),
+        profile=profile,
+        min_replicas=min_replicas,
+        max_replicas=max_replicas,
+        workers=workers,
+        cpu=cpu,
+        memory=memory,
+    )
+    typer.echo(svc["name"])
+    if not wait:
+        return
+    start = time.monotonic()
+    for svc in client.watch_service(name):
+        msg = f"  ({svc['message']})" if svc.get("message") else ""
+        color = {"RUNNING": "green", "UNHEALTHY": "red"}.get(svc["state"])
+        typer.secho(f"[{time.monotonic() - start:5.0f}s] {svc['state']}{msg}", fg=color, err=True)
+    if svc["state"] != "RUNNING":
+        raise typer.Exit(1)
+    typer.secho(f"POST {svc['endpoint']}", err=True)
+
+
+@serve_app.command("status")
+def serve_status(
+    name: str, team: TeamOpt = None, as_json: Annotated[bool, typer.Option("--json")] = False
+) -> None:
+    """Show one service."""
+    svc = _client(team).service(name)
+    if as_json:
+        typer.echo(json.dumps(svc, indent=2))
+    else:
+        _print_service(svc)
+
+
+@serve_app.command("list")
+def serve_list(team: TeamOpt = None) -> None:
+    """List your team's live services."""
+    typer.echo(f"{'NAME':20} {'STATE':10} {'JOB':10} ENDPOINT")
+    for s in _client(team).services():
+        typer.echo(f"{s['name']:20} {s['state']:10} {s['job_id']:10} {s['endpoint']}")
+
+
+@serve_app.command("delete")
+def serve_delete(name: str, team: TeamOpt = None) -> None:
+    """Delete a service and its Ray cluster."""
+    svc = _client(team).unserve(name)
+    typer.echo(f"{svc['name']} {svc['state']}")
 
 
 def main() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,8 @@ import httpx
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
 MAX_CODE_BYTES = 512 * 1024
 DEFAULT_URL = "http://127.0.0.1:8000"
+# The API's 409 hint when quota is held only by pods of finished work that are still terminating.
+TRANSIENT_BUSY = "retry in a few seconds"
 
 
 class RkpError(Exception):
@@ -101,6 +103,56 @@ class Client:
 
     def cancel(self, job_id: str) -> dict:
         return self._call("DELETE", f"/jobs/{job_id}").json()
+
+    def serve(
+        self,
+        name: str,
+        job_id: str,
+        *,
+        retry_for: float = 120,
+        poll: float = 3.0,
+        on_retry: Callable[[str], None] | None = None,
+        **spec: Any,
+    ) -> dict:
+        """Create a service. A 409 saying "retry in a few seconds" (a finished job's pods still
+        hold quota) is retried for up to `retry_for` seconds; any other error is raised."""
+        deadline = time.monotonic() + retry_for
+        body = {"name": name, "job_id": job_id, **spec}
+        while True:
+            try:
+                return self._call("POST", "/services", json=body).json()
+            except RkpError as e:
+                if e.status != 409 or TRANSIENT_BUSY not in e.detail:
+                    raise
+                if time.monotonic() + poll > deadline:
+                    raise
+                if on_retry:
+                    on_retry(e.detail)
+                time.sleep(poll)
+
+    def service(self, name: str) -> dict:
+        return self._call("GET", f"/services/{name}").json()
+
+    def services(self) -> list[dict]:
+        return self._call("GET", "/services").json()
+
+    def unserve(self, name: str) -> dict:
+        return self._call("DELETE", f"/services/{name}").json()
+
+    def watch_service(self, name: str, poll: float = 5.0, timeout: float = 600) -> Iterator[dict]:
+        """Yield the service each time its state changes, until it leaves DEPLOYING."""
+        deadline = time.monotonic() + timeout
+        last = None
+        while True:
+            svc = self.service(name)
+            if svc["state"] != last:
+                last = svc["state"]
+                yield svc
+            if last != "DEPLOYING":
+                return
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"service {name} still DEPLOYING after {timeout:.0f}s")
+            time.sleep(poll)
 
     def watch(self, job_id: str, poll: float = 2.0, timeout: float = 1800) -> Iterator[dict]:
         """Yield the job each time its state changes, until it reaches a terminal state."""
