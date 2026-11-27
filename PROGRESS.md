@@ -23,7 +23,12 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 with real output, and the old phase-by-phase list became "More commands". Measured: `make up teams keys` 3m07s, train → serve → predict → cost 176s.
 The first `make image` build was not timed (the image already existed). `make keys` is now a no-op when both key files exist, so the quickstart can be re-run.
 
-**Next:** the rest of Phase 9: README architecture diagram, screenshots, results table, §12 Results, remove the 🚧 markers and the stale
+**Architecture diagram redrawn** (`docs/diagrams/src/architecture.json` → `make diagrams`) to match what was built: admission + queue,
+reconciler read-back (status, logs, pod requests), code ConfigMap, simulated GPU, gpu-sim worker, `--no-monitor` heads, Serve replicas
+inside one worker pod, read-only checkpoint loading, optional monitoring. README §3 table updated. To check the layout, render to PNG with
+`google-chrome --headless=new --screenshot=out.png --window-size=1250,900 file://$PWD/docs/diagrams/architecture.svg` (no rsvg-convert here).
+
+**Next:** the rest of Phase 9: screenshots, results table, §12 Results, remove the 🚧 markers and the stale
 "Phase 0 of 9 done" banner, and resume bullets with real numbers.
 
 ---
