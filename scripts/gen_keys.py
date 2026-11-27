@@ -11,8 +11,11 @@ TEAMS = ("team-a", "team-b")
 ROOT = Path(__file__).resolve().parents[1]
 server, client = ROOT / "config" / "api_keys.yaml", ROOT / "config" / "rkp.toml"
 
+if server.exists() and client.exists():
+    print(f"keys already exist in {server.parent.name}/; delete both files to regenerate")
+    raise SystemExit(0)
 if server.exists() or client.exists():
-    raise SystemExit(f"{server} or {client} already exists; delete both to regenerate")
+    raise SystemExit(f"only one of {server} / {client} exists; delete both to regenerate")
 keys = {team: f"rkp_{secrets.token_urlsafe(24)}" for team in TEAMS}
 server.parent.mkdir(exist_ok=True)
 server.write_text("teams:\n" + "".join(f"  {t}: {k}\n" for t, k in keys.items()))
