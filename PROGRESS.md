@@ -37,7 +37,10 @@ load test 1 → 3 → 1 (down after 40s), p50 12 → 205 ms, ~94 req/s, 0 errors
 All 🚧 are gone, along with the ✅ on section headings. §15 marks Phase 9 ✅ and lists the optional extras not done (the promote-if-accurate
 pipeline and a real cloud GPU run). PLAN's case-study checkbox is ticked.
 
-**Next:** the resume bullets in PLAN.md (real numbers, built features only). That's the last non-optional Phase 9 item.
+**Resume bullets** are in PLAN.md Phase 9: a 2-bullet version and a 5-bullet longer one, with every number from README §12. 6.84 GiB is
+~7.3 GB, so they state the peak rather than "under 7 GB". **Phase 9 is complete apart from the optional stretch items.**
+
+**Next (all optional):** the `train → evaluate → deploy` promote-if-accurate pipeline (stretch), or the cloud GPU run (needs owner approval).
 
 **Screenshot gotchas:** the Claude-in-Chrome browser can't reach this laptop's localhost. `google-chrome --screenshot` captures the Ray dashboard
 blank (it fires before React renders), and `#/train` is blank in Ray 2.59. What works: launch headless Chrome with `--remote-debugging-port`,
