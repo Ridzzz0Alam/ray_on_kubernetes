@@ -1,0 +1,23 @@
+[
+  {"type":"text","x":20,"y":0,"text":"Observability: metrics come from the registry, not from live pods","fontSize":28},
+
+  {"type":"rectangle","x":20,"y":90,"width":240,"height":80,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"Reconciler (5s)\nstatus, timestamps,\ndriver logs","fontSize":16}},
+  {"type":"arrow","x":260,"y":130,"width":60,"height":0,"strokeColor":"#1e1e1e","label":{"text":"write","fontSize":14}},
+  {"type":"rectangle","x":320,"y":90,"width":260,"height":80,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"SQLite job registry\nsubmitted/started/finished\n+ logs (outlives CRs)","fontSize":15}},
+  {"type":"arrow","x":580,"y":130,"width":60,"height":0,"strokeColor":"#1e1e1e","label":{"text":"/metrics","fontSize":14}},
+  {"type":"rectangle","x":640,"y":90,"width":200,"height":80,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"platform_api\ncomputes at\nscrape time","fontSize":15}},
+  {"type":"arrow","x":840,"y":130,"width":40,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":880,"y":90,"width":200,"height":80,"backgroundColor":"#dee2e6","strokeColor":"#495057","roundness":{"type":3},"label":{"text":"Prometheus","fontSize":18}},
+  {"type":"arrow","x":1080,"y":130,"width":40,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":1120,"y":90,"width":200,"height":80,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"Grafana\n'rkp platform'\ndashboard","fontSize":15}},
+
+  {"type":"rectangle","x":620,"y":240,"width":200,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"Ray metrics\nCPU util, Serve QPS,\nreplica count","fontSize":15}},
+  {"type":"arrow","x":820,"y":275,"width":110,"height":-105,"strokeColor":"#495057","label":{"text":"scrape","fontSize":13}},
+  {"type":"rectangle","x":620,"y":340,"width":200,"height":70,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"kube-state-metrics\nkube_resourcequota\nper namespace","fontSize":15}},
+  {"type":"arrow","x":820,"y":375,"width":180,"height":-205,"strokeColor":"#495057","label":{"text":"scrape","fontSize":13}},
+
+  {"type":"arrow","x":450,"y":170,"width":0,"height":280,"strokeColor":"#22c55e","label":{"text":"rows","fontSize":13}},
+  {"type":"rectangle","x":320,"y":450,"width":260,"height":80,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"rkp cost\npod requests × time held\n× rates.yaml","fontSize":15}},
+  {"type":"arrow","x":580,"y":490,"width":40,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":620,"y":450,"width":260,"height":80,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"per-team report\nCPU-hours, GB-hours, USD\n(unit-tested math)","fontSize":15}}
+]

@@ -1,0 +1,28 @@
+[
+  {"type":"text","x":20,"y":0,"text":"Serving: replicas scale inside one fixed worker pod","fontSize":28},
+
+  {"type":"rectangle","x":20,"y":80,"width":200,"height":80,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"POST /services\n{name, job_id}","fontSize":18}},
+  {"type":"arrow","x":220,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":270,"y":80,"width":230,"height":80,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"latest checkpoint\nof a SUCCEEDED job\n(loaded read-only)","fontSize":16}},
+  {"type":"arrow","x":500,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":550,"y":80,"width":200,"height":80,"backgroundColor":"#d0bfff","strokeColor":"#8b5cf6","roundness":{"type":3},"label":{"text":"RayService CR\nRay Serve\nPOST /predict","fontSize":16}},
+  {"type":"arrow","x":750,"y":120,"width":50,"height":0,"strokeColor":"#1e1e1e"},
+  {"type":"rectangle","x":800,"y":80,"width":220,"height":80,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"KubeRay creates\nhead + 1 worker pod\n(2 CPU, fixed)","fontSize":16}},
+
+  {"type":"arrow","x":480,"y":160,"width":220,"height":90,"strokeColor":"#22c55e","strokeStyle":"dashed","label":{"text":"mount checkpoint","fontSize":14}},
+  {"type":"arrow","x":910,"y":160,"width":0,"height":50,"strokeColor":"#1e1e1e"},
+
+  {"type":"rectangle","x":20,"y":240,"width":200,"height":80,"backgroundColor":"#c3fae8","strokeColor":"#06b6d4","roundness":{"type":3},"label":{"text":"load_test.py\n1 → 20 concurrent\nclients","fontSize":16}},
+  {"type":"arrow","x":220,"y":280,"width":130,"height":0,"strokeColor":"#1e1e1e","label":{"text":"POST /predict","fontSize":14}},
+  {"type":"rectangle","x":350,"y":240,"width":250,"height":80,"backgroundColor":"#ffc9c9","strokeColor":"#ef4444","roundness":{"type":3},"label":{"text":"Ray head pod\nServe HTTP proxy\n≈ 90-94 req/s cap","fontSize":16}},
+  {"type":"arrow","x":600,"y":280,"width":80,"height":0,"strokeColor":"#1e1e1e","label":{"text":"routes","fontSize":14}},
+
+  {"type":"rectangle","x":680,"y":210,"width":340,"height":190,"backgroundColor":"transparent","strokeColor":"#495057","roundness":{"type":3}},
+  {"type":"text","x":700,"y":222,"text":"one fixed worker pod (2 CPU)","fontSize":16},
+  {"type":"text","x":700,"y":248,"text":"replicas (actors): min 1, max 3","fontSize":15},
+  {"type":"rectangle","x":700,"y":285,"width":90,"height":90,"backgroundColor":"#b2f2bb","strokeColor":"#22c55e","roundness":{"type":3},"label":{"text":"rep 1\n(min)","fontSize":14}},
+  {"type":"rectangle","x":800,"y":285,"width":90,"height":90,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","strokeStyle":"dashed","roundness":{"type":3},"label":{"text":"rep 2\n(+load)","fontSize":14}},
+  {"type":"rectangle","x":900,"y":285,"width":90,"height":90,"backgroundColor":"#ffd8a8","strokeColor":"#f59e0b","strokeStyle":"dashed","roundness":{"type":3},"label":{"text":"rep 3\n(max)","fontSize":14}},
+
+  {"type":"rectangle","x":20,"y":440,"width":1000,"height":90,"backgroundColor":"#fff3bf","strokeColor":"#f59e0b","roundness":{"type":3},"label":{"text":"Measured: replicas 1 → 3 → 1 (back to 1 in 38-40s after the ramp ends)\np50 12 ms at 1 client → 205-210 ms at 20 · ≈ 90-94 req/s · 0 errors\nthe cap is the single Serve proxy (1 core), not the replicas","fontSize":16}}
+]
