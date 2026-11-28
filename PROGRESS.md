@@ -6,6 +6,28 @@ Long-term plan → [PLAN.md](PLAN.md). Design → [ARCHITECTURE.md](ARCHITECTURE
 
 ---
 
+## 2026-11-28: cloud GPU quota denied, appeal sent; waiting
+
+**Done**
+- AWS denied the EC2 quota request for "Running On-Demand G and VT instances" in eu-central-1 (0 → 4 vCPUs, enough for one
+  g4dn.xlarge), with its standard "ramp up gradually" reply. An appeal with a detailed use case was sent as a reply on the
+  support case: one g4dn.xlarge, one 2–4 hour session, torn down the same day.
+- Checked the account's cost guard: a $5/month AWS Budget with email alerts at 85% and 100% of actual spend and 100% of forecast.
+
+**State:** no code changes. Nothing is running locally or on AWS. The project is finished apart from the optional cloud GPU run
+(PLAN Phase 8), which now waits on the appeal.
+
+**Next step:** when AWS replies, confirm the quota with
+`aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --region eu-central-1`.
+If it's 4, do the whole GPU run in one session, with the owner's go-ahead (AGENTS.md §4). Local GPU prep work was deliberately
+**not** started. If the appeal is denied, leave the GPU run as a "next step" in the README and article.
+
+**Gotchas:** `aws login` sessions expire, so re-run it before any CLI check. The AWS Support API needs a paid support plan
+(`SubscriptionRequiredException` on Basic), so read or reply to the case in the console's Support Center. The Service Quotas API
+can still say `CASE_OPENED` after the denial email arrives.
+
+---
+
 ## 2026-11-27: ARTICLE.md review: lessons learned, 3 more diagrams, fact fixes
 
 **Done**
